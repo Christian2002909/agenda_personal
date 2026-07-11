@@ -19,8 +19,8 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 | 1 | Presentaciones | **Pantalla principal (se abre primero al entrar)**. Filtro por Obligación (arranca en IVA), clientes agrupados por "VENCIMIENTO N - FECHA D" según terminación de RUC — igual que la planilla de control en Excel que usaba el estudio. Checkbox de presentado con fecha automática, y un link en cada cliente para editarlo (abre la pestaña Clientes) |
 | 2 | Clientes | Ahora es **solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes). Ya no tiene "Tipo de Contribuyente" (se sacó de la app y de la base, quedó redundante) |
 | 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
-| 4 | Calendario | Genera los vencimientos calculados según terminación de RUC, solo para las obligaciones que cada cliente tiene asignadas, y **solo muestra lo que todavía no se presentó** (una vez presentado, desaparece de acá). Se actualiza solo, nunca hay que recrearlo a mano |
-| 5 | Historial | Todo lo presentado alguna vez, orden cronológico, sin agrupar |
+| 4 | Calendario | Genera los vencimientos del **período VIGENTE únicamente** (se limpia solo cada mes/año, no acumula), solo para las obligaciones que cada cliente tiene asignadas, y solo muestra lo que todavía no se presentó. Se actualiza solo, nunca hay que recrearlo a mano |
+| 5 | Historial | Filtro por Obligación (igual que Presentaciones), agrupado por vencimiento. Para IVA (mensual): grilla del año completo mes por mes con la fecha exacta de vencimiento, verde/rojo/gris. Para las anuales: una fila por año (actual y anterior) con fecha exacta y estado |
 | 6 | Honorarios | Monto pactado por cliente, registro de pagos, estado "Al día"/"Debe" con deuda acumulada |
 | 7 | Configuración | Tema claro/oscuro, guardado por computadora (localStorage) |
 
@@ -97,6 +97,18 @@ Reestructuración pedida por el usuario mostrándole cómo se veía su planilla 
 - **`js/presentaciones.js`** es ahora la primera pestaña que se ve al loguearse (antes era Clientes). Tiene un filtro `<select>` por Obligación (arranca siempre en IVA, no hay opción "Todos" — se decidió así en vez de una vista mezclada porque el usuario prefirió una sola obligación a la vez, como las hojas del Excel). Para la obligación elegida, agrupa por terminación de RUC igual que el Excel (`VENCIMIENTO N - FECHA D`, usando `DIA_POR_TERMINACION_RUC` de `calendario-logica.js`) y muestra N° (correlativo sin cortes entre grupos), Nombre, RUC, Clave, y el checkbox de Presentado con fecha. El nombre del cliente es un botón que abre la pestaña Clientes para editarlo (`window.editarClienteDesdeOtraVista`).
 - **`js/clientes.js`** perdió su tabla/listado y su filtro por responsable: ahora solo tiene el formulario de alta/edición, siempre visible (no hay botón "+ Nuevo Cliente" para mostrarlo/ocultarlo). Al entrar directo a esta pestaña arranca en blanco ("Nuevo Cliente"); si se llega desde el botón de editar en Presentaciones, arranca con los datos de ese cliente cargados.
 - El truco para que no se pisen: `editarClienteDesdeOtraVista(clienteId)` carga los datos del cliente y sus obligaciones, pone una bandera `ignorarProximaCarga = true`, y recién ahí llama a `window.mostrarVista('vista-clientes')` (que dispara `cargarClientes()` vía `navegacion.js`) — `cargarClientes()` ve la bandera, no resetea el formulario, y la función de edición lo completa con los datos ya cargados. Sin esta bandera, `cargarClientes()` limpiaría el formulario a "Nuevo Cliente" antes de poder mostrarlo lleno.
+
+## Calendario: se limpia solo cada mes/año
+
+Antes, `js/calendario.js` mostraba TODOS los `calendario_vencimientos` no presentados, sin importar de qué período eran — con obligaciones mensuales (IVA) esto iba acumulando filas viejas sin presentar mes tras mes. Ahora, igual que Presentaciones, solo muestra el **período VIGENTE** de cada obligación (comparando contra `obtenerPeriodoVigente()`): lo de períodos anteriores, se haya presentado o no, deja de aparecer acá y solo queda visible en Historial.
+
+## Historial: filtro por Obligación + grilla mensual con fecha exacta
+
+Antes era una lista cronológica simple de solo lo YA presentado. Ahora (`js/historial.js`) tiene el mismo filtro por Obligación que Presentaciones (arranca en IVA) y agrupa por vencimiento igual que el Excel, pero muestra TODOS los períodos, se hayan presentado o no:
+
+- **Obligaciones mensuales (IVA)**: una fila por cliente con 12 columnas (Ene-Dic) del año actual. Cada celda calcula la fecha exacta de vencimiento con `calcularFechaVencimiento()` (la misma función pura que usa Calendario, no depende de que exista un registro en la base) y se colorea: verde si está presentado, rojo si ya venció y no se presentó, gris si todavía no llega la fecha.
+- **Obligaciones anuales**: una fila por cliente por ejercicio (año actual y el anterior), con la misma lógica de colores, más una columna de texto ("Presentado el...", "No presentado", "Todavía no vence").
+- El nombre del cliente también es un link que abre Clientes para editarlo, igual que en Presentaciones.
 
 ## Tema claro/oscuro
 

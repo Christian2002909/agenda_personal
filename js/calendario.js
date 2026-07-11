@@ -115,7 +115,7 @@ async function cargarCalendario() {
     ] = await Promise.all([
       supabaseCalendario
         .from('calendario_vencimientos')
-        .select('cliente_id, obligacion_id, periodo, fecha_vencimiento, clientes(razon_social), obligaciones(periodicidad)')
+        .select('cliente_id, obligacion_id, periodo, fecha_vencimiento, clientes(razon_social, cierre_fiscal_mes), obligaciones(periodicidad)')
         .order('fecha_vencimiento', { ascending: true }),
       supabaseCalendario
         .from('presentaciones')
@@ -126,16 +126,21 @@ async function cargarCalendario() {
     if (errorVencimientos) throw errorVencimientos;
     if (errorPresentados) throw errorPresentados;
 
-    // Solo mostramos lo que todavía no se presentó: si ya hay una fila en
-    // `presentaciones` marcada como "presentado" para ese mismo cliente +
-    // obligación + período, este vencimiento deja de listarse acá (ya está
-    // resuelto). El historial completo, presentado o no, sigue en Historial.
+    // El Calendario se "limpia" solo cada mes: únicamente muestra el
+    // período VIGENTE de cada obligación (igual que Presentaciones), no
+    // los meses/años anteriores. Si algo del período vigente todavía no
+    // se presentó, se sigue viendo acá; lo de períodos ya pasados (se
+    // presentó o no) queda solo en Historial.
     const presentadosSet = new Set(
       (presentados || []).map((p) => `${p.cliente_id}-${p.obligacion_id}-${p.periodo}`)
     );
-    const pendientes = (vencimientos || []).filter(
-      (v) => !presentadosSet.has(`${v.cliente_id}-${v.obligacion_id}-${v.periodo}`)
-    );
+    const pendientes = (vencimientos || []).filter((v) => {
+      if (presentadosSet.has(`${v.cliente_id}-${v.obligacion_id}-${v.periodo}`)) return false;
+
+      const cierreFiscalMes = v.clientes?.cierre_fiscal_mes ?? 12;
+      const periodoVigenteISO = formatearFechaISO(obtenerPeriodoVigente(v.obligaciones?.periodicidad, cierreFiscalMes));
+      return v.periodo === periodoVigenteISO;
+    });
 
     dibujarTablaCalendario(pendientes);
   } catch (error) {
