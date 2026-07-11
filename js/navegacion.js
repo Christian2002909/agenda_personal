@@ -42,3 +42,8 @@ function mostrarVista(nombreVista) {
 for (const boton of elBotonesNav) {
   boton.addEventListener('click', () => mostrarVista(boton.dataset.vista));
 }
+
+// Expuesta para que js/auth.js pueda recargar la pestaña activa apenas
+// se confirma el login (sin esto, la primera pestaña quedaría con el
+// error de "permiso denegado" que Supabase devuelve antes de loguearse).
+window.mostrarVista = mostrarVista;

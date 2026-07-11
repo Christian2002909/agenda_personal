@@ -36,6 +36,9 @@ const elClienteRazonSocial = document.getElementById('cliente-razon-social');
 const elClienteTerminacionRuc = document.getElementById('cliente-terminacion-ruc');
 const elClienteTipoContribuyente = document.getElementById('cliente-tipo-contribuyente');
 const elClienteResponsable = document.getElementById('cliente-responsable');
+const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-mes');
+
+const NOMBRES_MES_CLIENTES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 // Guardamos en memoria la última lista de clientes que llegó de Supabase,
 // para poder armar el filtro de responsables y abrir la edición sin tener
@@ -116,6 +119,7 @@ function dibujarTabla(clientes) {
       <td>${cliente.terminacion_ruc ?? ''}</td>
       <td>${escaparHtml(cliente.tipo_contribuyente)}</td>
       <td>${escaparHtml(cliente.responsable)}</td>
+      <td>${NOMBRES_MES_CLIENTES[(cliente.cierre_fiscal_mes ?? 12) - 1]}</td>
       <td>${formatearFecha(cliente.fecha_alta)}</td>
       <td><button class="boton boton-chico" data-id="${cliente.id}">Editar</button></td>
     `;
@@ -183,6 +187,7 @@ function abrirFormularioEdicion(cliente) {
   elClienteTerminacionRuc.value = cliente.terminacion_ruc ?? '';
   elClienteTipoContribuyente.value = cliente.tipo_contribuyente;
   elClienteResponsable.value = cliente.responsable;
+  elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
   elFormContenedor.classList.remove('oculto');
@@ -225,6 +230,7 @@ elForm.addEventListener('submit', async (evento) => {
     terminacion_ruc: elClienteTerminacionRuc.value === '' ? null : Number(elClienteTerminacionRuc.value),
     tipo_contribuyente: elClienteTipoContribuyente.value,
     responsable: elClienteResponsable.value.trim(),
+    cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
   };
 
   const idExistente = elClienteId.value;

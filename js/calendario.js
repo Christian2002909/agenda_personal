@@ -39,7 +39,7 @@ async function asegurarVencimientosDelPeriodoVigente() {
     { data: obligaciones, error: errorObligaciones },
     { data: feriados, error: errorFeriados },
   ] = await Promise.all([
-    supabaseCalendario.from('clientes').select('id, terminacion_ruc'),
+    supabaseCalendario.from('clientes').select('id, terminacion_ruc, cierre_fiscal_mes'),
     supabaseCalendario.from('obligaciones').select('*').neq('periodicidad', 'manual'),
     supabaseCalendario.from('feriados').select('fecha'),
   ]);
@@ -56,8 +56,10 @@ async function asegurarVencimientosDelPeriodoVigente() {
     // podemos calcular su día de vencimiento: lo saltamos por ahora.
     if (cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined) continue;
 
+    const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
+
     for (const obligacion of obligaciones || []) {
-      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad);
+      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
 
       const fechaVencimiento = calcularFechaVencimiento({
         codigoObligacion: obligacion.codigo,
@@ -65,6 +67,7 @@ async function asegurarVencimientosDelPeriodoVigente() {
         terminacionRuc: cliente.terminacion_ruc,
         periodoAncla,
         feriadosSet,
+        cierreFiscalMes,
       });
 
       if (!fechaVencimiento) continue;

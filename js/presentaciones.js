@@ -28,7 +28,7 @@ async function asegurarPresentacionesDelPeriodoVigente() {
     { data: clientes, error: errorClientes },
     { data: obligaciones, error: errorObligaciones },
   ] = await Promise.all([
-    supabasePresentaciones.from('clientes').select('id'),
+    supabasePresentaciones.from('clientes').select('id, cierre_fiscal_mes'),
     supabasePresentaciones.from('obligaciones').select('*').neq('periodicidad', 'manual'),
   ]);
 
@@ -38,8 +38,10 @@ async function asegurarPresentacionesDelPeriodoVigente() {
   const registrosACrear = [];
 
   for (const cliente of clientes || []) {
+    const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
+
     for (const obligacion of obligaciones || []) {
-      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad);
+      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
 
       registrosACrear.push({
         cliente_id: cliente.id,
@@ -72,14 +74,15 @@ async function cargarPresentaciones() {
 
     const { data, error } = await supabasePresentaciones
       .from('presentaciones')
-      .select('id, periodo, estado, fecha_presentacion, clientes(razon_social), obligaciones(nombre, periodicidad)');
+      .select('id, periodo, estado, fecha_presentacion, clientes(razon_social, cierre_fiscal_mes), obligaciones(nombre, periodicidad)');
 
     if (error) throw error;
 
     // Esta pantalla solo muestra el período VIGENTE de cada obligación.
     // Los períodos anteriores (ya presentados o no) se ven en Historial.
     const vigentes = (data || []).filter((fila) => {
-      const periodoVigenteISO = formatearFechaISO(obtenerPeriodoVigente(fila.obligaciones?.periodicidad));
+      const cierreFiscalMes = fila.clientes?.cierre_fiscal_mes ?? 12;
+      const periodoVigenteISO = formatearFechaISO(obtenerPeriodoVigente(fila.obligaciones?.periodicidad, cierreFiscalMes));
       return fila.periodo === periodoVigenteISO;
     });
 

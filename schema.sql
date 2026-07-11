@@ -28,6 +28,13 @@ create table if not exists public.clientes (
     -- tabla de usuarios/autenticación, así que no es una FK.
     responsable         text not null,
 
+    -- Mes (1-12) en que cierra el ejercicio fiscal de este cliente. La
+    -- mayoría cierra en diciembre (12, valor por defecto), pero algunos
+    -- clientes pueden tener un cierre distinto. calendario-logica.js usa
+    -- este valor para calcular en qué mes vence IRE SIMPLE/GENERAL y
+    -- ESTADO FINANCIERO (en vez de asumir siempre 31/12).
+    cierre_fiscal_mes   smallint not null default 12,
+
     fecha_alta          date not null default current_date,
 
     created_at          timestamptz not null default now(),
@@ -43,7 +50,10 @@ create table if not exists public.clientes (
         check (terminacion_ruc is null or terminacion_ruc between 0 and 9),
 
     constraint clientes_tipo_contribuyente_valido
-        check (tipo_contribuyente in ('IRE SIMPLE', 'IRE GENERAL'))
+        check (tipo_contribuyente in ('IRE SIMPLE', 'IRE GENERAL')),
+
+    constraint clientes_cierre_fiscal_mes_rango
+        check (cierre_fiscal_mes between 1 and 12)
 );
 
 comment on table  public.clientes is
@@ -52,6 +62,25 @@ comment on column public.clientes.terminacion_ruc is
     'Último dígito antes del guion del RUC; se usa luego para el calendario de vencimientos de IVA (SET).';
 comment on column public.clientes.responsable is
     'Encargado del cliente dentro del estudio (texto libre, sin FK a usuarios todavía).';
+comment on column public.clientes.cierre_fiscal_mes is
+    'Mes (1-12) de cierre del ejercicio fiscal; 12 = diciembre (default). Usado por calendario-logica.js para IRE SIMPLE/GENERAL y ESTADO FINANCIERO.';
+
+-- Migración para bases ya existentes creadas antes de este campo (la
+-- CREATE TABLE de arriba ya lo incluye para instalaciones nuevas; estas
+-- dos líneas son no-op si la columna/constraint ya existen).
+alter table public.clientes
+    add column if not exists cierre_fiscal_mes smallint not null default 12;
+
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint where conname = 'clientes_cierre_fiscal_mes_rango'
+    ) then
+        alter table public.clientes
+            add constraint clientes_cierre_fiscal_mes_rango
+            check (cierre_fiscal_mes between 1 and 12);
+    end if;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- 2. ÍNDICES
@@ -91,35 +120,30 @@ create trigger trg_clientes_set_updated_at
 -- ---------------------------------------------------------------------
 alter table public.clientes enable row level security;
 
--- FASE 1 — sin Supabase Auth ni tabla de usuarios propia.
--- La app Electron usa la anon key directamente, así que el control de
--- acceso real está en "quién tiene el instalador de la app", no en la fila.
--- Se habilita RLS (obligatorio en Supabase para exponer la tabla vía API)
--- con una única política permisiva para los roles anon y authenticated.
-create policy "clientes_acceso_total_fase1"
+-- ENDURECIDO: requiere Supabase Auth (ver tabla `perfiles`, sección 15).
+-- Se elimina explícitamente la policy permisiva de Fase 1 (incluía `anon`)
+-- para que esta migración limpie instalaciones que ya la tenían creada.
+drop policy if exists "clientes_acceso_total_fase1" on public.clientes;
+drop policy if exists "clientes_acceso_autenticados" on public.clientes;
+
+create policy "clientes_acceso_autenticados"
     on public.clientes
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
--- Grants explícitos (Supabase normalmente ya los aplica por defecto a
--- anon/authenticated, pero se dejan explícitos por claridad y portabilidad).
-grant select, insert, update, delete on public.clientes to anon, authenticated;
+revoke select, insert, update, delete on public.clientes from anon;
+grant select, insert, update, delete on public.clientes to authenticated;
 
 -- ---------------------------------------------------------------------
--- 5. ENDURECIMIENTO FUTURO (cuando se agregue Supabase Auth / login)
+-- 5. ENDURECIMIENTO POR ROL (futuro, opcional)
 -- ---------------------------------------------------------------------
--- Cuando el estudio tenga usuarios logueados vía Supabase Auth:
---   1) Crear tabla `perfiles` (id uuid references auth.users, rol text, nombre text).
---   2) Quitar la policy permisiva de arriba:
---        drop policy "clientes_acceso_total_fase1" on public.clientes;
---   3) Reemplazar por policies basadas en auth.uid(), p.ej.:
---        create policy "clientes_select_autenticados"
---          on public.clientes for select
---          to authenticated
---          using (true); -- todos los del estudio pueden ver todos los clientes
---
+-- Hoy cualquier usuario logueado (rol `authenticated`) tiene acceso total,
+-- igual para todos los responsables del estudio. Si más adelante se
+-- necesita restringir según el rol de `perfiles` (p.ej. que solo
+-- admin/socio pueda editar clientes), reemplazar la policy de arriba por
+-- algo como:
 --        create policy "clientes_modificar_admin_o_responsable"
 --          on public.clientes for update
 --          to authenticated
@@ -129,7 +153,6 @@ grant select, insert, update, delete on public.clientes to anon, authenticated;
 --              where p.id = auth.uid() and p.rol in ('admin', 'socio')
 --            )
 --          );
---   4) Quitar el grant a `anon` una vez que todo el tráfico pase por login.
 
 -- =====================================================================
 -- FASE 2 — Obligaciones, calendario de vencimientos, presentaciones,
@@ -463,93 +486,153 @@ create trigger trg_pagos_honorarios_set_updated_at
     execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------
--- 13. ROW LEVEL SECURITY (RLS) — mismo criterio que `clientes` (sección 4):
---     todavía sin Supabase Auth, así que se habilita RLS (obligatorio para
---     exponer la tabla vía API) con policies permisivas para anon/authenticated.
+-- 13. ROW LEVEL SECURITY (RLS) — ENDURECIDO, mismo criterio que `clientes`
+--     (sección 4): requiere Supabase Auth, se elimina el acceso `anon`.
 --
 --     Excepción deliberada: `obligaciones` es un catálogo fijo que NO se
 --     inserta/edita desde la app (solo las 5 filas precargadas arriba), así
 --     que su policy es de SOLO LECTURA — a diferencia del resto, que sí
---     recibe la policy permisiva total igual que `clientes`.
+--     recibe la policy de acceso total igual que `clientes`.
 -- ---------------------------------------------------------------------
 
 -- obligaciones: solo lectura desde la app
 alter table public.obligaciones enable row level security;
 
-create policy "obligaciones_lectura_fase1"
+drop policy if exists "obligaciones_lectura_fase1" on public.obligaciones;
+drop policy if exists "obligaciones_lectura_autenticados" on public.obligaciones;
+
+create policy "obligaciones_lectura_autenticados"
     on public.obligaciones
     for select
-    to anon, authenticated
+    to authenticated
     using (true);
 
-grant select on public.obligaciones to anon, authenticated;
+revoke select on public.obligaciones from anon;
+grant select on public.obligaciones to authenticated;
 
 -- feriados: lectura + escritura (se van cargando a mano cada año)
 alter table public.feriados enable row level security;
 
-create policy "feriados_acceso_total_fase1"
+drop policy if exists "feriados_acceso_total_fase1" on public.feriados;
+drop policy if exists "feriados_acceso_autenticados" on public.feriados;
+
+create policy "feriados_acceso_autenticados"
     on public.feriados
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
-grant select, insert, update, delete on public.feriados to anon, authenticated;
+revoke select, insert, update, delete on public.feriados from anon;
+grant select, insert, update, delete on public.feriados to authenticated;
 
 -- calendario_vencimientos
 alter table public.calendario_vencimientos enable row level security;
 
-create policy "calendario_vencimientos_acceso_total_fase1"
+drop policy if exists "calendario_vencimientos_acceso_total_fase1" on public.calendario_vencimientos;
+drop policy if exists "calendario_vencimientos_acceso_autenticados" on public.calendario_vencimientos;
+
+create policy "calendario_vencimientos_acceso_autenticados"
     on public.calendario_vencimientos
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
-grant select, insert, update, delete on public.calendario_vencimientos to anon, authenticated;
+revoke select, insert, update, delete on public.calendario_vencimientos from anon;
+grant select, insert, update, delete on public.calendario_vencimientos to authenticated;
 
 -- presentaciones
 alter table public.presentaciones enable row level security;
 
-create policy "presentaciones_acceso_total_fase1"
+drop policy if exists "presentaciones_acceso_total_fase1" on public.presentaciones;
+drop policy if exists "presentaciones_acceso_autenticados" on public.presentaciones;
+
+create policy "presentaciones_acceso_autenticados"
     on public.presentaciones
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
-grant select, insert, update, delete on public.presentaciones to anon, authenticated;
+revoke select, insert, update, delete on public.presentaciones from anon;
+grant select, insert, update, delete on public.presentaciones to authenticated;
 
 -- honorarios
 alter table public.honorarios enable row level security;
 
-create policy "honorarios_acceso_total_fase1"
+drop policy if exists "honorarios_acceso_total_fase1" on public.honorarios;
+drop policy if exists "honorarios_acceso_autenticados" on public.honorarios;
+
+create policy "honorarios_acceso_autenticados"
     on public.honorarios
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
-grant select, insert, update, delete on public.honorarios to anon, authenticated;
+revoke select, insert, update, delete on public.honorarios from anon;
+grant select, insert, update, delete on public.honorarios to authenticated;
 
 -- pagos_honorarios
 alter table public.pagos_honorarios enable row level security;
 
-create policy "pagos_honorarios_acceso_total_fase1"
+drop policy if exists "pagos_honorarios_acceso_total_fase1" on public.pagos_honorarios;
+drop policy if exists "pagos_honorarios_acceso_autenticados" on public.pagos_honorarios;
+
+create policy "pagos_honorarios_acceso_autenticados"
     on public.pagos_honorarios
     for all
-    to anon, authenticated
+    to authenticated
     using (true)
     with check (true);
 
-grant select, insert, update, delete on public.pagos_honorarios to anon, authenticated;
+revoke select, insert, update, delete on public.pagos_honorarios from anon;
+grant select, insert, update, delete on public.pagos_honorarios to authenticated;
 
 -- ---------------------------------------------------------------------
--- 14. ENDURECIMIENTO FUTURO — mismo criterio que la sección 5 (clientes).
---     Cuando exista Supabase Auth + tabla `perfiles`: reemplazar cada
---     policy "*_acceso_total_fase1" por policies basadas en auth.uid()/rol,
---     y quitar el grant a `anon`. Si en el futuro se necesita editar el
---     catálogo `obligaciones` desde una UI de administración, agregar ahí
---     una policy adicional de insert/update restringida al rol admin/socio
+-- 14. ENDURECIMIENTO POR ROL (futuro, opcional) — mismo criterio que la
+--     sección 5 (clientes). Si en el futuro se necesita editar el catálogo
+--     `obligaciones` desde una UI de administración, agregar ahí una
+--     policy adicional de insert/update restringida por `perfiles.rol`
 --     (hoy es intencionalmente de solo lectura).
 -- ---------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------
+-- 15. TABLA perfiles + Supabase Auth
+-- ---------------------------------------------------------------------
+-- Un perfil por usuario de Supabase Auth. Esta app NO tiene pantalla de
+-- alta de usuarios: los usuarios se crean a mano desde el dashboard de
+-- Supabase (Authentication → Users) y quien los crea agrega la fila
+-- correspondiente acá (o se puede automatizar con un trigger sobre
+-- auth.users más adelante si hace falta).
+create table if not exists public.perfiles (
+    id          uuid primary key references auth.users(id) on delete cascade,
+
+    nombre      text,
+
+    -- Por ahora ninguna policy distingue por rol (ver sección 5/14): todo
+    -- usuario autenticado tiene acceso total. Se deja la columna lista
+    -- para cuando haga falta un endurecimiento más fino.
+    rol         text not null default 'responsable',
+
+    created_at  timestamptz not null default now(),
+
+    constraint perfiles_rol_valido
+        check (rol in ('admin', 'responsable'))
+);
+
+comment on table public.perfiles is
+    'Un perfil por usuario de Supabase Auth (alta manual desde el dashboard de Supabase). rol queda preparado para endurecer RLS por rol en el futuro; hoy todas las policies solo exigen estar logueado.';
+
+alter table public.perfiles enable row level security;
+
+drop policy if exists "perfiles_leer_propio" on public.perfiles;
+
+create policy "perfiles_leer_propio"
+    on public.perfiles
+    for select
+    to authenticated
+    using (id = auth.uid());
+
+grant select on public.perfiles to authenticated;

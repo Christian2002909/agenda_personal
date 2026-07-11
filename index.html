@@ -11,18 +11,51 @@
     <p class="app-subtitle">Estudio Contable</p>
   </header>
 
-  <!-- Barra de navegación entre pantallas. data-vista indica qué sección
-       de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
-  <nav class="nav-principal">
-    <button class="nav-boton activo" data-vista="vista-clientes">Clientes</button>
-    <button class="nav-boton" data-vista="vista-obligaciones">Obligaciones</button>
-    <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
-    <button class="nav-boton" data-vista="vista-presentaciones">Presentaciones</button>
-    <button class="nav-boton" data-vista="vista-historial">Historial</button>
-    <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
-  </nav>
+  <!-- ============================== -->
+  <!-- VISTA: Login (Supabase Auth)   -->
+  <!-- ============================== -->
+  <!-- Se muestra sola al arrancar. js/auth.js la oculta y muestra
+       #app-autenticado apenas hay una sesión válida. No hay alta de
+       usuarios desde acá: se crean a mano en el dashboard de Supabase. -->
+  <section id="vista-login" class="vista-login">
+    <div class="tarjeta tarjeta-login">
+      <h2>Iniciar sesión</h2>
+      <div id="login-mensaje" class="mensaje mensaje-error oculto"></div>
+      <form id="form-login">
+        <div class="fila-form">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" required autocomplete="username" />
+        </div>
+        <div class="fila-form">
+          <label for="login-password">Contraseña</label>
+          <input type="password" id="login-password" required autocomplete="current-password" />
+        </div>
+        <div class="acciones-form">
+          <button type="submit" class="boton boton-primario">Ingresar</button>
+        </div>
+      </form>
+    </div>
+  </section>
 
-  <main class="contenedor">
+  <div id="app-autenticado" class="oculto">
+
+    <div class="barra-usuario">
+      <span id="usuario-actual"></span>
+      <button id="btn-logout" class="boton boton-secundario boton-chico">Cerrar sesión</button>
+    </div>
+
+    <!-- Barra de navegación entre pantallas. data-vista indica qué sección
+         de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
+    <nav class="nav-principal">
+      <button class="nav-boton activo" data-vista="vista-clientes">Clientes</button>
+      <button class="nav-boton" data-vista="vista-obligaciones">Obligaciones</button>
+      <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
+      <button class="nav-boton" data-vista="vista-presentaciones">Presentaciones</button>
+      <button class="nav-boton" data-vista="vista-historial">Historial</button>
+      <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
+    </nav>
+
+    <main class="contenedor">
 
     <!-- Mensajes de éxito o error para el usuario. Se muestra/oculta desde clientes.js -->
     <div id="mensaje" class="mensaje oculto"></div>
@@ -81,6 +114,25 @@
             <input type="text" id="cliente-responsable" placeholder="Ej: Christian" required />
           </div>
 
+          <div class="fila-form">
+            <label for="cliente-cierre-fiscal-mes">Mes de Cierre Fiscal</label>
+            <select id="cliente-cierre-fiscal-mes" required>
+              <option value="1">Enero</option>
+              <option value="2">Febrero</option>
+              <option value="3">Marzo</option>
+              <option value="4">Abril</option>
+              <option value="5">Mayo</option>
+              <option value="6">Junio</option>
+              <option value="7">Julio</option>
+              <option value="8">Agosto</option>
+              <option value="9">Septiembre</option>
+              <option value="10">Octubre</option>
+              <option value="11">Noviembre</option>
+              <option value="12" selected>Diciembre</option>
+            </select>
+            <small>La mayoría cierra en diciembre. Cambialo solo si este cliente tiene un ejercicio fiscal distinto.</small>
+          </div>
+
           <div class="acciones-form">
             <button type="submit" class="boton boton-primario">Guardar</button>
             <button type="button" id="btn-cancelar" class="boton boton-secundario">Cancelar</button>
@@ -98,6 +150,7 @@
               <th>Term. RUC</th>
               <th>Tipo Contribuyente</th>
               <th>Responsable</th>
+              <th>Cierre Fiscal</th>
               <th>Fecha Alta</th>
               <th></th>
             </tr>
@@ -237,8 +290,9 @@
       <section class="tarjeta">
         <h2>Honorarios por Cliente</h2>
         <p class="texto-ayuda">
-          "Al día" / "Debe" se calcula mirando si ya se pagó el período
-          vigente de cada cliente (no acumula deuda de períodos anteriores).
+          "Al día" / "Debe" acumula toda la deuda desde que se configuró el
+          honorario de cada cliente, comparando el total pactado (todos los
+          períodos) contra todos los pagos registrados.
         </p>
         <table class="tabla-clientes">
           <thead>
@@ -340,12 +394,17 @@
 
   </main>
 
+  </div>
+  <!-- fin #app-autenticado -->
+
   <!-- Cargamos los scripts con la lógica de cada pantalla. Adentro de
        clientes.js, obligaciones.js, calendario.js, presentaciones.js,
        historial.js y honorarios.js, con require(), se carga también
        supabaseClient.js. navegacion.js solo muestra/oculta secciones, no
-       necesita conexión a Supabase. -->
+       necesita conexión a Supabase. auth.js maneja el login/logout y
+       muestra #app-autenticado recién cuando hay sesión válida. -->
   <script src="js/navegacion.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/clientes.js"></script>
   <script src="js/obligaciones.js"></script>
   <script src="js/calendario.js"></script>

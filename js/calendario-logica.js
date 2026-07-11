@@ -13,20 +13,26 @@
 //   - IRE GENERAL y ESTADO FINANCIERO vencen en abril del año siguiente.
 //   - Si la fecha cae sábado, domingo o feriado, se corre al siguiente
 //     día hábil.
-//   - Asumimos cierre fiscal el 31 de diciembre para todos los clientes
-//     (no hay todavía un campo de cierre fiscal personalizado por cliente).
+//   - El cierre fiscal es por cliente (columna `clientes.cierre_fiscal_mes`,
+//     1-12, default 12 = diciembre). Todo lo que sigue está expresado en
+//     "meses posteriores al cierre", así que funciona para cualquier mes
+//     de cierre, no solo diciembre.
 // -----------------------------------------------------------------------
+
+const CIERRE_FISCAL_MES_DEFAULT = 12;
 
 const DIA_POR_TERMINACION_RUC = {
   0: 7, 1: 9, 2: 11, 3: 13, 4: 15,
   5: 17, 6: 19, 7: 21, 8: 23, 9: 25,
 };
 
-// Mes de vencimiento (1-12) para cada obligación ANUAL. IVA no está acá
-// porque es mensual (vence en el mismo mes del período, no en un mes fijo).
-const MES_VENCIMIENTO_ANUAL = {
-  IRE_SIMPLE: 3,        // marzo (3er mes posterior al cierre)
-  IRE_GENERAL: 4,       // abril (4to mes posterior al cierre)
+// Cantidad de meses posteriores al cierre fiscal en que vence cada
+// obligación ANUAL. IVA no está acá porque es mensual (vence en el mismo
+// mes del período, no relativo a un cierre). Con cierre en diciembre esto
+// da marzo/abril, que es la regla original confirmada con la SET.
+const MESES_POSTERIORES_AL_CIERRE = {
+  IRE_SIMPLE: 3,        // 3er mes posterior al cierre
+  IRE_GENERAL: 4,       // 4to mes posterior al cierre
   ESTADO_FINANCIERO: 4, // se presenta junto con IRE GENERAL
 };
 
@@ -62,7 +68,14 @@ function ajustarASiguienteDiaHabil(fecha, feriadosSet) {
 // período determinado. Devuelve un objeto Date, o null si no corresponde
 // calcularla automáticamente (obligación "manual", como IDU, o cliente
 // sin terminación de RUC cargada todavía).
-function calcularFechaVencimiento({ codigoObligacion, periodicidad, terminacionRuc, periodoAncla, feriadosSet }) {
+function calcularFechaVencimiento({
+  codigoObligacion,
+  periodicidad,
+  terminacionRuc,
+  periodoAncla,
+  feriadosSet,
+  cierreFiscalMes = CIERRE_FISCAL_MES_DEFAULT,
+}) {
   if (periodicidad === 'manual') return null;
 
   const diaBase = DIA_POR_TERMINACION_RUC[terminacionRuc];
@@ -75,11 +88,13 @@ function calcularFechaVencimiento({ codigoObligacion, periodicidad, terminacionR
     anio = periodoAncla.getFullYear();
     mes = periodoAncla.getMonth();
   } else {
-    // Anual: `periodoAncla` representa el EJERCICIO FISCAL que cierra el
-    // 31/12 de ese año. El vencimiento cae en marzo/abril del año
-    // SIGUIENTE (ver MES_VENCIMIENTO_ANUAL).
-    anio = periodoAncla.getFullYear() + 1;
-    mes = MES_VENCIMIENTO_ANUAL[codigoObligacion] - 1;
+    // Anual: `periodoAncla` representa el EJERCICIO FISCAL que cierra en
+    // el mes `cierreFiscalMes` de ese año. El vencimiento cae N meses
+    // después del cierre (ver MESES_POSTERIORES_AL_CIERRE), pudiendo caer
+    // en el año siguiente si el cierre + N cruza fin de año.
+    const totalMeses = (cierreFiscalMes - 1) + MESES_POSTERIORES_AL_CIERRE[codigoObligacion];
+    anio = periodoAncla.getFullYear() + Math.floor(totalMeses / 12);
+    mes = totalMeses % 12;
   }
 
   const fechaBase = new Date(anio, mes, diaBase);
@@ -89,18 +104,23 @@ function calcularFechaVencimiento({ codigoObligacion, periodicidad, terminacionR
 // Determina cuál es el "período vigente" que el calendario perpetuo debe
 // tener siempre generado, según la fecha de hoy. Así no hace falta
 // recrear nada a mano cuando cambia el mes o el año.
-function obtenerPeriodoVigente(periodicidad, hoy = new Date()) {
+function obtenerPeriodoVigente(periodicidad, cierreFiscalMes = CIERRE_FISCAL_MES_DEFAULT, hoy = new Date()) {
   if (periodicidad === 'mensual') {
     return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   }
-  // Anual: el ejercicio fiscal que vence ESTE año calendario es el del
-  // año anterior (cierre 31/12 del año pasado, vencimiento este año).
-  return new Date(hoy.getFullYear() - 1, 0, 1);
+  // Anual: el ejercicio vigente es el que cerró más recientemente. Si ya
+  // pasamos el mes de cierre de este año, es el de este año; si todavía
+  // no llegamos, es el del año pasado (con cierre en diciembre esto da
+  // siempre "año pasado", que es la regla original).
+  const mesHoy = hoy.getMonth() + 1;
+  const anioEjercicio = mesHoy > cierreFiscalMes ? hoy.getFullYear() : hoy.getFullYear() - 1;
+  return new Date(anioEjercicio, 0, 1);
 }
 
 module.exports = {
+  CIERRE_FISCAL_MES_DEFAULT,
   DIA_POR_TERMINACION_RUC,
-  MES_VENCIMIENTO_ANUAL,
+  MESES_POSTERIORES_AL_CIERRE,
   formatearFechaISO,
   ajustarASiguienteDiaHabil,
   calcularFechaVencimiento,

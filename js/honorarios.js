@@ -8,10 +8,13 @@
 //   2. Formulario para registrar un pago.
 //   3. Historial de todos los pagos, del más reciente al más antiguo.
 //
-// "Al día" / "Debe" es una simplificación intencional para esta fase: solo
-// mira si ya se pagó (parcial o total) lo correspondiente al PERÍODO
-// VIGENTE de ese cliente. No acumula deuda de períodos anteriores todavía
-// -- eso podría agregarse más adelante si el estudio lo necesita.
+// "Al día" / "Debe" acumula TODA la deuda desde que se configuró el
+// honorario de ese cliente: cuenta cuántos períodos (meses o años, según
+// periodicidad) pasaron desde `honorarios.created_at` hasta el período
+// vigente (inclusive), multiplica por el monto pactado, y le resta la
+// suma de TODOS los pagos históricos del cliente (no solo los del período
+// vigente). Si el cliente tiene cierre fiscal distinto a diciembre, se
+// usa ese mes para determinar el período vigente (igual que el Calendario).
 // -----------------------------------------------------------------------
 
 (function () {
@@ -67,7 +70,7 @@ async function cargarHonorarios() {
       { data: honorarios, error: errorHonorarios },
       { data: pagos, error: errorPagos },
     ] = await Promise.all([
-      supabaseHonorarios.from('clientes').select('id, razon_social').order('razon_social'),
+      supabaseHonorarios.from('clientes').select('id, razon_social, cierre_fiscal_mes').order('razon_social'),
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
     ]);
@@ -91,16 +94,43 @@ async function cargarHonorarios() {
 
 // --- Tabla de honorarios por cliente -------------------------------------
 
-function calcularEstadoHonorario(honorario) {
+// Cuenta cuántos períodos (meses o años, según periodicidad) hay que
+// pagar desde que se configuró el honorario (created_at) hasta el período
+// vigente, ambos inclusive. Nunca da menos de 1.
+function contarPeriodosAdeudables(honorario, cierreFiscalMes) {
+  const fechaCreacion = new Date(honorario.created_at);
+
+  if (honorario.periodicidad === 'mensual') {
+    const inicio = new Date(fechaCreacion.getFullYear(), fechaCreacion.getMonth(), 1);
+    const vigente = obtenerPeriodoVigente('mensual');
+    const meses = (vigente.getFullYear() - inicio.getFullYear()) * 12 + (vigente.getMonth() - inicio.getMonth()) + 1;
+    return Math.max(meses, 1);
+  }
+
+  const mesCreacion = fechaCreacion.getMonth() + 1;
+  const anioEjercicioInicio = mesCreacion > cierreFiscalMes ? fechaCreacion.getFullYear() : fechaCreacion.getFullYear() - 1;
+  const vigente = obtenerPeriodoVigente('anual', cierreFiscalMes);
+  const anios = vigente.getFullYear() - anioEjercicioInicio + 1;
+  return Math.max(anios, 1);
+}
+
+// Devuelve { estado: 'al_dia' | 'debe', saldoPendiente } comparando toda
+// la deuda acumulada (monto x períodos adeudables) contra TODOS los pagos
+// históricos del cliente, sin importar a qué período se hayan imputado.
+function calcularEstadoHonorario(honorario, cliente) {
   if (!honorario) return null;
 
-  const periodoVigenteISO = formatearFechaISO(obtenerPeriodoVigente(honorario.periodicidad));
+  const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
+  const periodosAdeudables = contarPeriodosAdeudables(honorario, cierreFiscalMes);
 
-  const pagadoEstePeriodo = pagosCache
-    .filter((pago) => pago.cliente_id === honorario.cliente_id && pago.periodo === periodoVigenteISO)
+  const totalPagado = pagosCache
+    .filter((pago) => pago.cliente_id === honorario.cliente_id)
     .reduce((total, pago) => total + Number(pago.monto_pagado), 0);
 
-  return pagadoEstePeriodo >= Number(honorario.monto) ? 'al_dia' : 'debe';
+  const totalAdeudado = Number(honorario.monto) * periodosAdeudables;
+  const saldoPendiente = Math.max(totalAdeudado - totalPagado, 0);
+
+  return { estado: saldoPendiente > 0 ? 'debe' : 'al_dia', saldoPendiente };
 }
 
 function formatearGuaranies(monto) {
@@ -118,24 +148,24 @@ function dibujarTablaHonorarios() {
 
   for (const cliente of clientesCacheHonorarios) {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
-    const estado = calcularEstadoHonorario(honorario);
+    const resultado = calcularEstadoHonorario(honorario, cliente);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${honorario ? formatearGuaranies(honorario.monto) : '—'}</td>
       <td>${honorario ? (honorario.periodicidad === 'mensual' ? 'Mensual' : 'Anual') : '—'}</td>
-      <td>${dibujarBadgeEstado(estado)}</td>
+      <td>${dibujarBadgeEstado(resultado)}</td>
       <td><button class="boton boton-chico" data-cliente-id="${cliente.id}">${honorario ? 'Editar' : 'Configurar'}</button></td>
     `;
     elTablaHonorariosBody.appendChild(tr);
   }
 }
 
-function dibujarBadgeEstado(estado) {
-  if (estado === 'al_dia') return '<span class="badge badge-verde">Al día</span>';
-  if (estado === 'debe') return '<span class="badge badge-rojo">Debe</span>';
-  return '<span class="texto-ayuda">Sin configurar</span>';
+function dibujarBadgeEstado(resultado) {
+  if (!resultado) return '<span class="texto-ayuda">Sin configurar</span>';
+  if (resultado.estado === 'al_dia') return '<span class="badge badge-verde">Al día</span>';
+  return `<span class="badge badge-rojo">Debe ${formatearGuaranies(resultado.saldoPendiente)}</span>`;
 }
 
 function escaparHtmlHonorarios(texto) {
@@ -221,9 +251,11 @@ function poblarSelectClientesPago() {
 // el pago corresponde a un período anterior (atrasado).
 elPagoCliente.addEventListener('change', () => {
   const clienteId = Number(elPagoCliente.value);
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
   const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
   const periodicidad = honorario ? honorario.periodicidad : 'mensual';
-  elPagoPeriodo.value = formatearFechaISO(obtenerPeriodoVigente(periodicidad));
+  const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
+  elPagoPeriodo.value = formatearFechaISO(obtenerPeriodoVigente(periodicidad, cierreFiscalMes));
 
   if (honorario) elPagoMonto.value = honorario.monto;
 });

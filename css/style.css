@@ -99,7 +99,10 @@ body {
 
 select,
 input[type='text'],
-input[type='number'] {
+input[type='number'],
+input[type='email'],
+input[type='password'],
+input[type='date'] {
   padding: 8px 10px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
@@ -235,4 +238,27 @@ input[type='number'] {
 .badge-rojo {
   background-color: #fee2e2;
   color: #991b1b;
+}
+
+.vista-login {
+  display: flex;
+  justify-content: center;
+  padding: 60px 24px;
+}
+
+.tarjeta-login {
+  width: 100%;
+  max-width: 360px;
+}
+
+.barra-usuario {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 32px;
+  background-color: white;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+  color: #4b5563;
 }
