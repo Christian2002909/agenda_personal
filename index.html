@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gestor de Obligaciones</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Gestor de Obligaciones</h1>
+    <p class="app-subtitle">Estudio Contable</p>
+  </header>
+
+  <!-- Barra de navegación entre pantallas. data-vista indica qué sección
+       de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
+  <nav class="nav-principal">
+    <button class="nav-boton activo" data-vista="vista-clientes">Clientes</button>
+    <button class="nav-boton" data-vista="vista-obligaciones">Obligaciones</button>
+    <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
+    <button class="nav-boton" data-vista="vista-presentaciones">Presentaciones</button>
+    <button class="nav-boton" data-vista="vista-historial">Historial</button>
+    <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
+  </nav>
+
+  <main class="contenedor">
+
+    <!-- Mensajes de éxito o error para el usuario. Se muestra/oculta desde clientes.js -->
+    <div id="mensaje" class="mensaje oculto"></div>
+
+    <!-- ============================== -->
+    <!-- VISTA: Clientes                -->
+    <!-- ============================== -->
+    <section id="vista-clientes" class="vista">
+
+      <!-- Barra de acciones: filtro por responsable + botón para dar de alta -->
+      <section class="barra-acciones">
+        <div class="filtro">
+          <label for="filtro-responsable">Ver clientes de:</label>
+          <select id="filtro-responsable">
+            <option value="todos">Todos</option>
+            <!-- Las opciones de responsables se agregan dinámicamente desde clientes.js -->
+          </select>
+        </div>
+        <button id="btn-nuevo-cliente" class="boton boton-primario">+ Nuevo Cliente</button>
+      </section>
+
+      <!-- Formulario de alta / edición. Empieza oculto hasta que se necesite. -->
+      <section id="form-cliente-contenedor" class="tarjeta oculto">
+        <h2 id="form-titulo">Nuevo Cliente</h2>
+        <form id="form-cliente">
+          <!-- Campo oculto: guarda el id cuando estamos editando un cliente existente -->
+          <input type="hidden" id="cliente-id" />
+
+          <div class="fila-form">
+            <label for="cliente-ruc">RUC</label>
+            <input type="text" id="cliente-ruc" placeholder="Ej: 80012345-6" required />
+          </div>
+
+          <div class="fila-form">
+            <label for="cliente-razon-social">Razón Social / Nombre</label>
+            <input type="text" id="cliente-razon-social" required />
+          </div>
+
+          <div class="fila-form">
+            <label for="cliente-terminacion-ruc">Terminación de RUC</label>
+            <input type="number" id="cliente-terminacion-ruc" min="0" max="9" />
+            <small>Se completa sola con el último dígito del RUC, pero podés corregirla.</small>
+          </div>
+
+          <div class="fila-form">
+            <label for="cliente-tipo-contribuyente">Tipo de Contribuyente</label>
+            <select id="cliente-tipo-contribuyente" required>
+              <option value="">Seleccioná una opción</option>
+              <option value="IRE SIMPLE">IRE SIMPLE</option>
+              <option value="IRE GENERAL">IRE GENERAL</option>
+            </select>
+          </div>
+
+          <div class="fila-form">
+            <label for="cliente-responsable">Responsable</label>
+            <input type="text" id="cliente-responsable" placeholder="Ej: Christian" required />
+          </div>
+
+          <div class="acciones-form">
+            <button type="submit" class="boton boton-primario">Guardar</button>
+            <button type="button" id="btn-cancelar" class="boton boton-secundario">Cancelar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Listado de clientes -->
+      <section class="tarjeta">
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>RUC</th>
+              <th>Razón Social</th>
+              <th>Term. RUC</th>
+              <th>Tipo Contribuyente</th>
+              <th>Responsable</th>
+              <th>Fecha Alta</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-clientes-body">
+            <!-- Las filas se agregan dinámicamente desde clientes.js -->
+          </tbody>
+        </table>
+        <p id="sin-clientes" class="sin-datos oculto">No hay clientes para mostrar todavía.</p>
+      </section>
+
+    </section>
+
+    <!-- ============================== -->
+    <!-- VISTA: Obligaciones (catálogo) -->
+    <!-- ============================== -->
+    <section id="vista-obligaciones" class="vista oculto">
+      <section class="tarjeta">
+        <h2>Catálogo de Obligaciones</h2>
+        <p class="texto-ayuda">
+          Este catálogo es fijo y no se edita desde la app. Cada obligación
+          define cómo se calculan sus vencimientos en el Calendario (Fase 3).
+        </p>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th>Periodicidad</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-obligaciones-body">
+            <!-- Las filas se agregan dinámicamente desde js/obligaciones.js -->
+          </tbody>
+        </table>
+      </section>
+    </section>
+
+    <!-- ============================== -->
+    <!-- VISTA: Calendario perpetuo     -->
+    <!-- ============================== -->
+    <section id="vista-calendario" class="vista oculto">
+      <section class="tarjeta">
+        <h2>Calendario de Vencimientos</h2>
+        <p class="texto-ayuda">
+          Se genera y actualiza solo: no hace falta recrearlo cada mes ni
+          cada año. La obligación IDU no aparece acá porque se carga a
+          mano solo cuando corresponde (distribución de dividendos).
+        </p>
+        <div id="calendario-mensaje" class="mensaje mensaje-error oculto"></div>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Obligación</th>
+              <th>Período</th>
+              <th>Vencimiento</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-calendario-body">
+            <!-- Las filas se agregan dinámicamente desde js/calendario.js -->
+          </tbody>
+        </table>
+        <p id="sin-vencimientos" class="sin-datos oculto">
+          No hay vencimientos todavía (cargá al menos un cliente con terminación de RUC).
+        </p>
+      </section>
+    </section>
+
+    <!-- ============================== -->
+    <!-- VISTA: Presentaciones          -->
+    <!-- ============================== -->
+    <section id="vista-presentaciones" class="vista oculto">
+      <section class="tarjeta">
+        <h2>Presentaciones del Período Vigente</h2>
+        <p class="texto-ayuda">
+          Tildá "Presentado" cuando ya se presentó esa obligación. Al
+          cambiar el mes o el año, esta lista se limpia sola para el
+          período nuevo — lo viejo queda guardado en Historial (Fase 5).
+        </p>
+        <div id="presentaciones-mensaje" class="mensaje mensaje-error oculto"></div>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Obligación</th>
+              <th>Período</th>
+              <th>Presentado</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-presentaciones-body">
+            <!-- Las filas se agregan dinámicamente desde js/presentaciones.js -->
+          </tbody>
+        </table>
+        <p id="sin-presentaciones" class="sin-datos oculto">
+          No hay presentaciones todavía (cargá al menos un cliente con terminación de RUC).
+        </p>
+      </section>
+    </section>
+
+    <!-- ============================== -->
+    <!-- VISTA: Historial               -->
+    <!-- ============================== -->
+    <section id="vista-historial" class="vista oculto">
+      <section class="tarjeta">
+        <h2>Historial de Presentaciones</h2>
+        <p class="texto-ayuda">
+          Todo lo que se presentó alguna vez, del más reciente al más
+          antiguo. No se agrupa por mes: es un registro cronológico simple.
+        </p>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Obligación</th>
+              <th>Período</th>
+              <th>Presentado el</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-historial-body">
+            <!-- Las filas se agregan dinámicamente desde js/historial.js -->
+          </tbody>
+        </table>
+        <p id="sin-historial" class="sin-datos oculto">Todavía no se presentó nada.</p>
+      </section>
+    </section>
+
+    <!-- ============================== -->
+    <!-- VISTA: Honorarios              -->
+    <!-- ============================== -->
+    <section id="vista-honorarios" class="vista oculto">
+
+      <div id="honorarios-mensaje" class="mensaje oculto"></div>
+
+      <!-- Honorario pactado por cliente -->
+      <section class="tarjeta">
+        <h2>Honorarios por Cliente</h2>
+        <p class="texto-ayuda">
+          "Al día" / "Debe" se calcula mirando si ya se pagó el período
+          vigente de cada cliente (no acumula deuda de períodos anteriores).
+        </p>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Monto Pactado</th>
+              <th>Periodicidad</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-honorarios-body">
+            <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
+          </tbody>
+        </table>
+        <p id="sin-honorarios" class="sin-datos oculto">Cargá al menos un cliente primero.</p>
+      </section>
+
+      <!-- Formulario de configuración de honorario (oculto hasta que se necesite) -->
+      <section id="form-honorario-contenedor" class="tarjeta oculto">
+        <h2 id="form-honorario-titulo">Configurar honorario</h2>
+        <form id="form-honorario">
+          <input type="hidden" id="honorario-cliente-id" />
+          <p><strong>Cliente:</strong> <span id="honorario-cliente-nombre"></span></p>
+
+          <div class="fila-form">
+            <label for="honorario-monto">Monto Pactado (Gs.)</label>
+            <input type="number" id="honorario-monto" min="1" step="1" required />
+          </div>
+
+          <div class="fila-form">
+            <label for="honorario-periodicidad">Periodicidad</label>
+            <select id="honorario-periodicidad" required>
+              <option value="mensual">Mensual</option>
+              <option value="anual">Anual</option>
+            </select>
+          </div>
+
+          <div class="acciones-form">
+            <button type="submit" class="boton boton-primario">Guardar</button>
+            <button type="button" id="btn-cancelar-honorario" class="boton boton-secundario">Cancelar</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Registrar un pago -->
+      <section class="tarjeta">
+        <h2>Registrar Pago</h2>
+        <form id="form-pago">
+          <div class="fila-form">
+            <label for="pago-cliente">Cliente</label>
+            <select id="pago-cliente" required>
+              <option value="">Seleccioná un cliente</option>
+            </select>
+          </div>
+
+          <div class="fila-form">
+            <label for="pago-monto">Monto Pagado (Gs.)</label>
+            <input type="number" id="pago-monto" min="1" step="1" required />
+          </div>
+
+          <div class="fila-form">
+            <label for="pago-fecha">Fecha de Pago</label>
+            <input type="date" id="pago-fecha" />
+          </div>
+
+          <div class="fila-form">
+            <label for="pago-periodo">Corresponde al período (cualquier fecha del mes/año correspondiente)</label>
+            <input type="date" id="pago-periodo" />
+            <small>Se sugiere solo al elegir el cliente. Cambiala si el pago es de un período anterior.</small>
+          </div>
+
+          <div class="acciones-form">
+            <button type="submit" class="boton boton-primario">Registrar Pago</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Historial de pagos -->
+      <section class="tarjeta">
+        <h2>Historial de Pagos</h2>
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Monto</th>
+              <th>Fecha de Pago</th>
+              <th>Período</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-pagos-body">
+            <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
+          </tbody>
+        </table>
+        <p id="sin-pagos" class="sin-datos oculto">Todavía no se registró ningún pago.</p>
+      </section>
+
+    </section>
+
+  </main>
+
+  <!-- Cargamos los scripts con la lógica de cada pantalla. Adentro de
+       clientes.js, obligaciones.js, calendario.js, presentaciones.js,
+       historial.js y honorarios.js, con require(), se carga también
+       supabaseClient.js. navegacion.js solo muestra/oculta secciones, no
+       necesita conexión a Supabase. -->
+  <script src="js/navegacion.js"></script>
+  <script src="js/clientes.js"></script>
+  <script src="js/obligaciones.js"></script>
+  <script src="js/calendario.js"></script>
+  <script src="js/presentaciones.js"></script>
+  <script src="js/historial.js"></script>
+  <script src="js/honorarios.js"></script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+/* css/style.css
+   Estilos generales de la app. Buscamos un look simple y prolijo,
+   tipo panel de administración. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background-color: #f4f5f7;
+  color: #1f2937;
+}
+
+.app-header {
+  background-color: #1e3a5f;
+  color: white;
+  padding: 20px 32px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.app-subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+.nav-principal {
+  background-color: white;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 32px;
+  display: flex;
+  gap: 4px;
+}
+
+.nav-boton {
+  padding: 12px 18px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+}
+
+.nav-boton:hover {
+  color: #1e3a5f;
+}
+
+.nav-boton.activo {
+  color: #1e3a5f;
+  font-weight: 600;
+  border-bottom-color: #1e3a5f;
+}
+
+.texto-ayuda {
+  color: #6b7280;
+  font-size: 13px;
+  margin-top: -6px;
+  margin-bottom: 16px;
+}
+
+.contenedor {
+  max-width: 1000px;
+  margin: 24px auto;
+  padding: 0 24px;
+}
+
+.tarjeta {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.barra-acciones {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.filtro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filtro label {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+select,
+input[type='text'],
+input[type='number'] {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.boton {
+  padding: 9px 16px;
+  border-radius: 6px;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.boton-primario {
+  background-color: #1e3a5f;
+  color: white;
+}
+
+.boton-primario:hover {
+  background-color: #16304d;
+}
+
+.boton-secundario {
+  background-color: #e5e7eb;
+  color: #1f2937;
+  margin-left: 8px;
+}
+
+.boton-chico {
+  padding: 5px 10px;
+  font-size: 13px;
+  background-color: #eef2ff;
+  color: #1e3a5f;
+}
+
+.fila-form {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fila-form label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.fila-form small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.acciones-form {
+  margin-top: 10px;
+}
+
+.tabla-clientes {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tabla-clientes th,
+.tabla-clientes td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 14px;
+}
+
+.tabla-clientes th {
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.sin-datos {
+  text-align: center;
+  color: #9ca3af;
+  padding: 20px 0;
+}
+
+.mensaje {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.mensaje-exito {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.mensaje-error {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.oculto {
+  display: none;
+}
+
+.fecha-vencida {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.celda-checkbox {
+  text-align: center;
+}
+
+.celda-checkbox input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-verde {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.badge-rojo {
+  background-color: #fee2e2;
+  color: #991b1b;
+}

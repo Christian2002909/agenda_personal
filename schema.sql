@@ -1,0 +1,555 @@
+-- =====================================================================
+-- SCHEMA.SQL — Fase 1: tabla `clientes`
+-- Estudio contable (Paraguay) · Backend Supabase (Postgres)
+-- App de escritorio Electron, sin backend intermedio (usa anon key)
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 1. TABLA clientes
+-- ---------------------------------------------------------------------
+create table if not exists public.clientes (
+    id                  bigint generated always as identity primary key,
+
+    -- RUC paraguayo: dígitos + guion + dígito verificador (ej: "80012345-6")
+    ruc                 text not null,
+
+    razon_social        text not null,
+
+    -- Último dígito antes del guion del RUC. Se puede derivar automáticamente
+    -- en la app, pero queda editable a mano. Se usará en fases posteriores
+    -- para calcular el vencimiento mensual de IVA según el calendario del SET.
+    terminacion_ruc     smallint,
+
+    -- Solo dos valores permitidos por ahora (ver nota de endurecimiento abajo
+    -- si más adelante se agregan más regímenes, p.ej. "IVA AGROPECUARIO").
+    tipo_contribuyente  text not null,
+
+    -- Encargado del cliente dentro del estudio. Texto libre: todavía no hay
+    -- tabla de usuarios/autenticación, así que no es una FK.
+    responsable         text not null,
+
+    fecha_alta          date not null default current_date,
+
+    created_at          timestamptz not null default now(),
+    updated_at          timestamptz not null default now(),
+
+    constraint clientes_ruc_unique
+        unique (ruc),
+
+    constraint clientes_ruc_formato
+        check (ruc ~ '^[0-9]{1,8}-[0-9]$'),
+
+    constraint clientes_terminacion_ruc_rango
+        check (terminacion_ruc is null or terminacion_ruc between 0 and 9),
+
+    constraint clientes_tipo_contribuyente_valido
+        check (tipo_contribuyente in ('IRE SIMPLE', 'IRE GENERAL'))
+);
+
+comment on table  public.clientes is
+    'Clientes del estudio contable (Fase 1). Obligaciones, honorarios, etc. se agregan en fases posteriores.';
+comment on column public.clientes.terminacion_ruc is
+    'Último dígito antes del guion del RUC; se usa luego para el calendario de vencimientos de IVA (SET).';
+comment on column public.clientes.responsable is
+    'Encargado del cliente dentro del estudio (texto libre, sin FK a usuarios todavía).';
+
+-- ---------------------------------------------------------------------
+-- 2. ÍNDICES
+-- ---------------------------------------------------------------------
+-- El UNIQUE de arriba ya crea un índice para ruc, no hace falta duplicarlo.
+
+-- Filtro más frecuente: "mis clientes" por responsable.
+create index if not exists idx_clientes_responsable
+    on public.clientes (responsable);
+
+-- Filtro secundario común: listar por régimen tributario.
+create index if not exists idx_clientes_tipo_contribuyente
+    on public.clientes (tipo_contribuyente);
+
+-- ---------------------------------------------------------------------
+-- 3. TRIGGER updated_at
+-- ---------------------------------------------------------------------
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+    new.updated_at := now();
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_clientes_set_updated_at on public.clientes;
+
+create trigger trg_clientes_set_updated_at
+    before update on public.clientes
+    for each row
+    execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------
+-- 4. ROW LEVEL SECURITY (RLS)
+-- ---------------------------------------------------------------------
+alter table public.clientes enable row level security;
+
+-- FASE 1 — sin Supabase Auth ni tabla de usuarios propia.
+-- La app Electron usa la anon key directamente, así que el control de
+-- acceso real está en "quién tiene el instalador de la app", no en la fila.
+-- Se habilita RLS (obligatorio en Supabase para exponer la tabla vía API)
+-- con una única política permisiva para los roles anon y authenticated.
+create policy "clientes_acceso_total_fase1"
+    on public.clientes
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+-- Grants explícitos (Supabase normalmente ya los aplica por defecto a
+-- anon/authenticated, pero se dejan explícitos por claridad y portabilidad).
+grant select, insert, update, delete on public.clientes to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 5. ENDURECIMIENTO FUTURO (cuando se agregue Supabase Auth / login)
+-- ---------------------------------------------------------------------
+-- Cuando el estudio tenga usuarios logueados vía Supabase Auth:
+--   1) Crear tabla `perfiles` (id uuid references auth.users, rol text, nombre text).
+--   2) Quitar la policy permisiva de arriba:
+--        drop policy "clientes_acceso_total_fase1" on public.clientes;
+--   3) Reemplazar por policies basadas en auth.uid(), p.ej.:
+--        create policy "clientes_select_autenticados"
+--          on public.clientes for select
+--          to authenticated
+--          using (true); -- todos los del estudio pueden ver todos los clientes
+--
+--        create policy "clientes_modificar_admin_o_responsable"
+--          on public.clientes for update
+--          to authenticated
+--          using (
+--            exists (
+--              select 1 from public.perfiles p
+--              where p.id = auth.uid() and p.rol in ('admin', 'socio')
+--            )
+--          );
+--   4) Quitar el grant a `anon` una vez que todo el tráfico pase por login.
+
+-- =====================================================================
+-- FASE 2 — Obligaciones, calendario de vencimientos, presentaciones,
+-- honorarios (extiende el esquema de Fase 1, sobre la tabla `clientes`).
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 6. TABLA obligaciones (catálogo FIJO, precargado — 5 filas, no se
+--    inserta/edita desde la app)
+-- ---------------------------------------------------------------------
+create table if not exists public.obligaciones (
+    id            bigint generated always as identity primary key,
+
+    -- Identificador estable usado por la app (no cambia aunque cambie
+    -- `nombre`). En mayúsculas y con guion bajo por convención.
+    codigo        text not null,
+
+    nombre        text not null,
+
+    -- Determina cómo la lógica de generación del calendario (en JS) trata
+    -- cada obligación:
+    --   mensual = se genera un período todos los meses (IVA).
+    --   anual   = se genera un período una vez al año (IRE SIMPLE/GENERAL,
+    --             ESTADO FINANCIERO).
+    --   manual  = NUNCA se genera solo; se crea a mano cuando el contador
+    --             confirma que corresponde (IDU).
+    periodicidad  text not null,
+
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+
+    constraint obligaciones_codigo_unique
+        unique (codigo),
+
+    constraint obligaciones_periodicidad_valida
+        check (periodicidad in ('mensual', 'anual', 'manual'))
+);
+
+comment on table  public.obligaciones is
+    'Catálogo FIJO de obligaciones fiscales (5 filas precargadas, no se insertan/editan desde la app). Ver INSERT de carga inicial más abajo.';
+comment on column public.obligaciones.periodicidad is
+    'mensual = vence todos los meses (IVA). anual = vence una vez al año (IRE SIMPLE/GENERAL, ESTADO FINANCIERO). manual = nunca se genera solo; se crea a mano cuando corresponde (IDU).';
+
+-- Carga inicial (idempotente: si se corre de nuevo, actualiza nombre y
+-- periodicidad en vez de duplicar filas).
+insert into public.obligaciones (codigo, nombre, periodicidad) values
+    ('IVA',               'IVA',                'mensual'),
+    ('IRE_SIMPLE',        'IRE SIMPLE',          'anual'),
+    ('IRE_GENERAL',       'IRE GENERAL',         'anual'),
+    ('ESTADO_FINANCIERO', 'ESTADO FINANCIERO',   'anual'),
+    ('IDU',               'IDU',                'manual')
+on conflict (codigo) do update
+    set nombre       = excluded.nombre,
+        periodicidad = excluded.periodicidad;
+
+-- ---------------------------------------------------------------------
+-- 7. TABLA feriados
+-- ---------------------------------------------------------------------
+create table if not exists public.feriados (
+    id           bigint generated always as identity primary key,
+
+    fecha        date not null,
+
+    -- Ej: "Día de la Independencia" o "Decreto 6280 - Mundial".
+    descripcion  text not null,
+
+    -- Opcional: distingue feriados fijos (de ley, se repiten cada año) de
+    -- los agregados por decreto (hasta 3 por año, no predecibles). NULL si
+    -- no se quiere clasificar.
+    origen       text,
+
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now(),
+
+    constraint feriados_fecha_unique
+        unique (fecha),
+
+    constraint feriados_origen_valido
+        check (origen is null or origen in ('fijo', 'decreto'))
+);
+
+comment on table  public.feriados is
+    'Feriados cargados manualmente por el estudio (fijos + hasta 3 por decreto/año, no predecibles). Se usan para correr vencimientos al siguiente día hábil.';
+
+-- ---------------------------------------------------------------------
+-- 8. TABLA calendario_vencimientos
+-- ---------------------------------------------------------------------
+create table if not exists public.calendario_vencimientos (
+    id                 bigint generated always as identity primary key,
+
+    cliente_id         bigint not null
+                            references public.clientes(id) on delete cascade,
+
+    obligacion_id      bigint not null
+                            references public.obligaciones(id) on delete restrict,
+
+    -- Fecha "ancla" del período (NO es la fecha de vencimiento):
+    --   - obligación mensual (IVA): primer día del mes declarado
+    --     (ej. "julio 2026" -> 2026-07-01).
+    --   - obligación anual/manual (IRE SIMPLE/GENERAL, ESTADO FINANCIERO,
+    --     IDU): 1º de enero del año declarado (ej. "2026" -> 2026-01-01).
+    -- Se eligió `date` (en vez de texto "2026-07" / "2026") para ordenar y
+    -- filtrar con operadores de fecha nativos y no mezclar formatos entre
+    -- mensual y anual.
+    periodo            date not null,
+
+    fecha_vencimiento  date not null,
+
+    -- false = calculado automáticamente por la lógica de calendario (JS).
+    -- true  = ingresado/ajustado a mano (uso típico: IDU, que nunca se
+    --         genera solo — ver reglas de negocio en el bloque 8.1).
+    generado_manual    boolean not null default false,
+
+    created_at         timestamptz not null default now(),
+    updated_at         timestamptz not null default now(),
+
+    constraint calendario_cliente_obligacion_periodo_unique
+        unique (cliente_id, obligacion_id, periodo)
+);
+
+comment on table  public.calendario_vencimientos is
+    'Próximo vencimiento calculado (o ingresado a mano) por cliente + obligación + período. Un registro por combinación (ver unique constraint); el cálculo de fecha_vencimiento vive en la app (JS), no en SQL.';
+comment on column public.calendario_vencimientos.periodo is
+    'Fecha ancla del período: primer día del mes (mensual) o 1º de enero del año (anual/manual). No es la fecha de vencimiento.';
+comment on column public.calendario_vencimientos.generado_manual is
+    'true si el registro fue creado/ajustado a mano (típico de IDU); false si lo generó automáticamente la lógica de calendario.';
+
+create index if not exists idx_calendario_fecha_vencimiento
+    on public.calendario_vencimientos (fecha_vencimiento);
+
+create index if not exists idx_calendario_obligacion_id
+    on public.calendario_vencimientos (obligacion_id);
+
+-- ---------------------------------------------------------------------
+-- 8.1 REGLAS DE NEGOCIO para fecha_vencimiento — SOLO REFERENCIA.
+--     El cálculo real se implementa en JavaScript (app), no en SQL.
+--     Confirmadas con la SET; revisar si cambian por nueva normativa.
+-- ---------------------------------------------------------------------
+-- 1) Día base del mes según terminación de RUC del cliente (aplica a IVA,
+--    IRE SIMPLE, IRE GENERAL y ESTADO FINANCIERO — todas usan esta misma
+--    tabla de días, solo cambia el MES, ver punto 2):
+--
+--        terminacion_ruc  ->  día del mes
+--        0                ->  7
+--        1                ->  9
+--        2                ->  11
+--        3                ->  13
+--        4                ->  15
+--        5                ->  17
+--        6                ->  19
+--        7                ->  21
+--        8                ->  23
+--        9                ->  25
+--
+-- 2) Mes de vencimiento según obligación:
+--      - IVA               (mensual): mismo mes que el período declarado.
+--      - IRE SIMPLE        (anual):   3er mes posterior al cierre fiscal.
+--                                     Cierre asumido 31/12 => vence en MARZO.
+--      - IRE GENERAL       (anual):   4to mes posterior al cierre.
+--                                     Cierre asumido 31/12 => vence en ABRIL.
+--      - ESTADO FINANCIERO (anual):   mismo vencimiento que IRE GENERAL
+--                                     (se presentan juntos, mismo mes/día).
+--      - IDU               (manual):  NO se genera automáticamente en
+--                                     ningún período. Se crea a mano cuando
+--                                     el contador confirma que el cliente
+--                                     distribuyó dividendos ese año
+--                                     (calendario_vencimientos.generado_manual
+--                                     = true).
+--
+-- 3) Ajuste por día inhábil: si la fecha resultante (día base + mes) cae
+--    sábado, domingo o figura en `feriados`, se corre al siguiente día
+--    hábil (siguiente día que no sea sábado/domingo/feriado).
+--
+-- 4) Si el cierre fiscal de un cliente deja de ser 31/12, los meses 3 y 4
+--    del punto 2 deben recalcularse relativos a SU cierre, no al calendario
+--    natural (hoy se asume 31/12 para todos los clientes).
+-- ---------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------
+-- 9. TABLA presentaciones
+-- ---------------------------------------------------------------------
+create table if not exists public.presentaciones (
+    id                  bigint generated always as identity primary key,
+
+    cliente_id          bigint not null
+                             references public.clientes(id) on delete cascade,
+
+    obligacion_id       bigint not null
+                             references public.obligaciones(id) on delete restrict,
+
+    -- Misma convención de fecha ancla que calendario_vencimientos.periodo.
+    periodo             date not null,
+
+    estado              text not null default 'pendiente',
+
+    -- Se completa sola al marcar como presentado (now() desde la app);
+    -- permanece NULL mientras estado = 'pendiente'.
+    fecha_presentacion  timestamptz,
+
+    created_at          timestamptz not null default now(),
+    updated_at          timestamptz not null default now(),
+
+    constraint presentaciones_cliente_obligacion_periodo_unique
+        unique (cliente_id, obligacion_id, periodo),
+
+    constraint presentaciones_estado_valido
+        check (estado in ('pendiente', 'presentado')),
+
+    constraint presentaciones_fecha_presentacion_consistente
+        check (
+            (estado = 'pendiente'  and fecha_presentacion is null)
+            or
+            (estado = 'presentado' and fecha_presentacion is not null)
+        )
+);
+
+comment on table  public.presentaciones is
+    'Estado de presentación por cliente + obligación + período. Al cambiar de período se inserta una fila nueva en estado pendiente; las filas de períodos anteriores nunca se borran ni se sobrescriben (historial permanente).';
+
+-- Acelera el caso de uso más común del dashboard: "qué está pendiente
+-- ahora", sin tener que escanear el historial ya presentado.
+create index if not exists idx_presentaciones_pendientes
+    on public.presentaciones (periodo)
+    where estado = 'pendiente';
+
+-- ---------------------------------------------------------------------
+-- 10. TABLA honorarios
+-- ---------------------------------------------------------------------
+create table if not exists public.honorarios (
+    id            bigint generated always as identity primary key,
+
+    cliente_id    bigint not null
+                       references public.clientes(id) on delete cascade,
+
+    -- Monto pactado en guaraníes. numeric(14,0): sin decimales (el Gs. no
+    -- usa centavos en la práctica de este estudio) y con margen amplio
+    -- (hasta 99.999.999.999.999 Gs.).
+    monto         numeric(14, 0) not null,
+
+    periodicidad  text not null,
+
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+
+    constraint honorarios_cliente_unique
+        unique (cliente_id),
+
+    constraint honorarios_monto_positivo
+        check (monto > 0),
+
+    constraint honorarios_periodicidad_valida
+        check (periodicidad in ('mensual', 'anual'))
+);
+
+comment on table public.honorarios is
+    'Honorario pactado por cliente (uno por cliente, ver unique constraint). Deliberadamente NO tiene columna de estado "al día / debe": ese estado se deriva comparando esta tabla con pagos_honorarios (en la app, o en una vista futura) para que nunca quede desincronizado de los pagos reales.';
+
+-- ---------------------------------------------------------------------
+-- 11. TABLA pagos_honorarios
+-- ---------------------------------------------------------------------
+create table if not exists public.pagos_honorarios (
+    id            bigint generated always as identity primary key,
+
+    cliente_id    bigint not null
+                       references public.clientes(id) on delete cascade,
+
+    monto_pagado  numeric(14, 0) not null,
+
+    fecha_pago    date not null default current_date,
+
+    -- Período que cubre el pago (misma convención de fecha ancla que
+    -- calendario_vencimientos.periodo: primer día del mes si el cliente
+    -- tiene honorarios mensuales, 1º de enero si son anuales). Se permite
+    -- más de un pago por cliente+período (pagos parciales).
+    periodo       date not null,
+
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+
+    constraint pagos_honorarios_monto_positivo
+        check (monto_pagado > 0)
+);
+
+comment on table public.pagos_honorarios is
+    'Historial de pagos de honorarios por cliente. Nunca se actualiza/borra un pago histórico; los pagos parciales se registran como filas adicionales del mismo período.';
+
+create index if not exists idx_pagos_honorarios_cliente_periodo
+    on public.pagos_honorarios (cliente_id, periodo);
+
+create index if not exists idx_pagos_honorarios_cliente_fecha
+    on public.pagos_honorarios (cliente_id, fecha_pago desc);
+
+-- ---------------------------------------------------------------------
+-- 12. TRIGGERS updated_at — reusan public.set_updated_at(), ya creada en
+--     la sección 3 para `clientes` (no se redefine la función).
+-- ---------------------------------------------------------------------
+drop trigger if exists trg_obligaciones_set_updated_at on public.obligaciones;
+create trigger trg_obligaciones_set_updated_at
+    before update on public.obligaciones
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_feriados_set_updated_at on public.feriados;
+create trigger trg_feriados_set_updated_at
+    before update on public.feriados
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_calendario_vencimientos_set_updated_at on public.calendario_vencimientos;
+create trigger trg_calendario_vencimientos_set_updated_at
+    before update on public.calendario_vencimientos
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_presentaciones_set_updated_at on public.presentaciones;
+create trigger trg_presentaciones_set_updated_at
+    before update on public.presentaciones
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_honorarios_set_updated_at on public.honorarios;
+create trigger trg_honorarios_set_updated_at
+    before update on public.honorarios
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_pagos_honorarios_set_updated_at on public.pagos_honorarios;
+create trigger trg_pagos_honorarios_set_updated_at
+    before update on public.pagos_honorarios
+    for each row
+    execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------
+-- 13. ROW LEVEL SECURITY (RLS) — mismo criterio que `clientes` (sección 4):
+--     todavía sin Supabase Auth, así que se habilita RLS (obligatorio para
+--     exponer la tabla vía API) con policies permisivas para anon/authenticated.
+--
+--     Excepción deliberada: `obligaciones` es un catálogo fijo que NO se
+--     inserta/edita desde la app (solo las 5 filas precargadas arriba), así
+--     que su policy es de SOLO LECTURA — a diferencia del resto, que sí
+--     recibe la policy permisiva total igual que `clientes`.
+-- ---------------------------------------------------------------------
+
+-- obligaciones: solo lectura desde la app
+alter table public.obligaciones enable row level security;
+
+create policy "obligaciones_lectura_fase1"
+    on public.obligaciones
+    for select
+    to anon, authenticated
+    using (true);
+
+grant select on public.obligaciones to anon, authenticated;
+
+-- feriados: lectura + escritura (se van cargando a mano cada año)
+alter table public.feriados enable row level security;
+
+create policy "feriados_acceso_total_fase1"
+    on public.feriados
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.feriados to anon, authenticated;
+
+-- calendario_vencimientos
+alter table public.calendario_vencimientos enable row level security;
+
+create policy "calendario_vencimientos_acceso_total_fase1"
+    on public.calendario_vencimientos
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.calendario_vencimientos to anon, authenticated;
+
+-- presentaciones
+alter table public.presentaciones enable row level security;
+
+create policy "presentaciones_acceso_total_fase1"
+    on public.presentaciones
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.presentaciones to anon, authenticated;
+
+-- honorarios
+alter table public.honorarios enable row level security;
+
+create policy "honorarios_acceso_total_fase1"
+    on public.honorarios
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.honorarios to anon, authenticated;
+
+-- pagos_honorarios
+alter table public.pagos_honorarios enable row level security;
+
+create policy "pagos_honorarios_acceso_total_fase1"
+    on public.pagos_honorarios
+    for all
+    to anon, authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.pagos_honorarios to anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 14. ENDURECIMIENTO FUTURO — mismo criterio que la sección 5 (clientes).
+--     Cuando exista Supabase Auth + tabla `perfiles`: reemplazar cada
+--     policy "*_acceso_total_fase1" por policies basadas en auth.uid()/rol,
+--     y quitar el grant a `anon`. Si en el futuro se necesita editar el
+--     catálogo `obligaciones` desde una UI de administración, agregar ahí
+--     una policy adicional de insert/update restringida al rol admin/socio
+--     (hoy es intencionalmente de solo lectura).
+-- ---------------------------------------------------------------------
