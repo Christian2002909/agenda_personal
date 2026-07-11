@@ -48,11 +48,11 @@
          de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
     <nav class="nav-principal">
       <button class="nav-boton activo" data-vista="vista-clientes">Clientes</button>
-      <button class="nav-boton" data-vista="vista-obligaciones">Obligaciones</button>
       <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
       <button class="nav-boton" data-vista="vista-presentaciones">Presentaciones</button>
       <button class="nav-boton" data-vista="vista-historial">Historial</button>
       <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
+      <button class="nav-boton" data-vista="vista-configuracion">Configuración</button>
     </nav>
 
     <main class="contenedor">
@@ -115,6 +115,19 @@
           </div>
 
           <div class="fila-form">
+            <label for="cliente-clave-marangatu">Clave Marangatu</label>
+            <input type="text" id="cliente-clave-marangatu" placeholder="Clave de acceso al SET" />
+          </div>
+
+          <div class="fila-form">
+            <label>Obligaciones de este cliente</label>
+            <div id="cliente-obligaciones-checkboxes" class="grupo-checkboxes">
+              <!-- Los checkboxes se arman dinámicamente desde clientes.js, uno por obligación del catálogo -->
+            </div>
+            <small>Se marcan solas según el tipo de contribuyente, pero podés corregirlas (agregar IDU, sacar alguna, etc.).</small>
+          </div>
+
+          <div class="fila-form">
             <label for="cliente-cierre-fiscal-mes">Mes de Cierre Fiscal</label>
             <select id="cliente-cierre-fiscal-mes" required>
               <option value="1">Enero</option>
@@ -150,6 +163,7 @@
               <th>Term. RUC</th>
               <th>Tipo Contribuyente</th>
               <th>Responsable</th>
+              <th>Clave Marangatu</th>
               <th>Cierre Fiscal</th>
               <th>Fecha Alta</th>
               <th></th>
@@ -162,31 +176,6 @@
         <p id="sin-clientes" class="sin-datos oculto">No hay clientes para mostrar todavía.</p>
       </section>
 
-    </section>
-
-    <!-- ============================== -->
-    <!-- VISTA: Obligaciones (catálogo) -->
-    <!-- ============================== -->
-    <section id="vista-obligaciones" class="vista oculto">
-      <section class="tarjeta">
-        <h2>Catálogo de Obligaciones</h2>
-        <p class="texto-ayuda">
-          Este catálogo es fijo y no se edita desde la app. Cada obligación
-          define cómo se calculan sus vencimientos en el Calendario (Fase 3).
-        </p>
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Nombre</th>
-              <th>Periodicidad</th>
-            </tr>
-          </thead>
-          <tbody id="tabla-obligaciones-body">
-            <!-- Las filas se agregan dinámicamente desde js/obligaciones.js -->
-          </tbody>
-        </table>
-      </section>
     </section>
 
     <!-- ============================== -->
@@ -205,7 +194,6 @@
           <thead>
             <tr>
               <th>Cliente</th>
-              <th>Obligación</th>
               <th>Período</th>
               <th>Vencimiento</th>
             </tr>
@@ -392,21 +380,45 @@
 
     </section>
 
+    <!-- ============================== -->
+    <!-- VISTA: Configuración           -->
+    <!-- ============================== -->
+    <section id="vista-configuracion" class="vista oculto">
+      <section class="tarjeta">
+        <h2>Configuración</h2>
+        <div class="fila-form">
+          <label>Tema</label>
+          <div class="grupo-radio">
+            <label class="opcion-radio">
+              <input type="radio" name="tema" id="tema-claro" value="claro" />
+              Claro
+            </label>
+            <label class="opcion-radio">
+              <input type="radio" name="tema" id="tema-oscuro" value="oscuro" />
+              Oscuro
+            </label>
+          </div>
+          <small>Se guarda en esta computadora; cada persona puede elegir el suyo.</small>
+        </div>
+      </section>
+    </section>
+
   </main>
 
   </div>
   <!-- fin #app-autenticado -->
 
   <!-- Cargamos los scripts con la lógica de cada pantalla. Adentro de
-       clientes.js, obligaciones.js, calendario.js, presentaciones.js,
-       historial.js y honorarios.js, con require(), se carga también
-       supabaseClient.js. navegacion.js solo muestra/oculta secciones, no
-       necesita conexión a Supabase. auth.js maneja el login/logout y
-       muestra #app-autenticado recién cuando hay sesión válida. -->
+       clientes.js, calendario.js, presentaciones.js, historial.js y
+       honorarios.js, con require(), se carga también supabaseClient.js.
+       navegacion.js solo muestra/oculta secciones, no necesita conexión a
+       Supabase. auth.js maneja el login/logout y muestra #app-autenticado
+       recién cuando hay sesión válida. configuracion.js aplica el tema
+       claro/oscuro y no necesita Supabase tampoco. -->
+  <script src="js/configuracion.js"></script>
   <script src="js/navegacion.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/clientes.js"></script>
-  <script src="js/obligaciones.js"></script>
   <script src="js/calendario.js"></script>
   <script src="js/presentaciones.js"></script>
   <script src="js/historial.js"></script>

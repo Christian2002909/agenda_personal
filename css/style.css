@@ -1,6 +1,67 @@
 /* css/style.css
    Estilos generales de la app. Buscamos un look simple y prolijo,
-   tipo panel de administración. */
+   tipo panel de administración.
+
+   Los colores viven en variables CSS (--color-*) para poder soportar modo
+   claro/oscuro (ver js/configuracion.js, que pone data-theme="oscuro" en
+   <html>): todos los selectores de abajo usan las variables, nunca colores
+   fijos, así los dos temas se actualizan solo tocando este bloque. */
+
+:root {
+  --color-fondo: #f4f5f7;
+  --color-texto: #1f2937;
+  --color-texto-secundario: #6b7280;
+  --color-superficie: #ffffff;
+  --color-borde: #e5e7eb;
+  --color-input-fondo: #ffffff;
+  --color-input-borde: #d1d5db;
+
+  --color-marca: #1e3a5f;
+  --color-marca-hover: #16304d;
+  --color-marca-texto: #cbd5e1;
+
+  --color-secundario-fondo: #e5e7eb;
+  --color-secundario-texto: #1f2937;
+
+  --color-chico-fondo: #eef2ff;
+  --color-chico-texto: #1e3a5f;
+
+  --color-exito-fondo: #dcfce7;
+  --color-exito-texto: #166534;
+
+  --color-error-fondo: #fee2e2;
+  --color-error-texto: #991b1b;
+
+  --color-vencido: #b91c1c;
+}
+
+:root[data-theme='oscuro'] {
+  --color-fondo: #0f172a;
+  --color-texto: #e2e8f0;
+  --color-texto-secundario: #94a3b8;
+  --color-superficie: #1e293b;
+  --color-borde: #334155;
+  --color-input-fondo: #0f172a;
+  --color-input-borde: #475569;
+
+  --color-marca: #14283f;
+  --color-marca-hover: #0e1d2e;
+  --color-marca-texto: #94a3b8;
+
+  --color-secundario-fondo: #334155;
+  --color-secundario-texto: #e2e8f0;
+
+  --color-chico-fondo: #1e3a5f;
+  --color-chico-texto: #93c5fd;
+
+  --color-exito-fondo: #14532d;
+  --color-exito-texto: #86efac;
+
+  --color-error-fondo: #4c0519;
+  --color-error-texto: #fca5a5;
+
+  --color-vencido: #f87171;
+}
 
 * {
   box-sizing: border-box;
@@ -9,12 +70,12 @@
 body {
   margin: 0;
   font-family: 'Segoe UI', Arial, sans-serif;
-  background-color: #f4f5f7;
-  color: #1f2937;
+  background-color: var(--color-fondo);
+  color: var(--color-texto);
 }
 
 .app-header {
-  background-color: #1e3a5f;
+  background-color: var(--color-marca);
   color: white;
   padding: 20px 32px;
 }
@@ -27,12 +88,12 @@ body {
 .app-subtitle {
   margin: 4px 0 0;
   font-size: 14px;
-  color: #cbd5e1;
+  color: var(--color-marca-texto);
 }
 
 .nav-principal {
-  background-color: white;
-  border-bottom: 1px solid #e5e7eb;
+  background-color: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
   padding: 0 32px;
   display: flex;
   gap: 4px;
@@ -43,23 +104,23 @@ body {
   border: none;
   background: none;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-texto-secundario);
   cursor: pointer;
   border-bottom: 3px solid transparent;
 }
 
 .nav-boton:hover {
-  color: #1e3a5f;
+  color: var(--color-marca);
 }
 
 .nav-boton.activo {
-  color: #1e3a5f;
+  color: var(--color-marca);
   font-weight: 600;
-  border-bottom-color: #1e3a5f;
+  border-bottom-color: var(--color-marca);
 }
 
 .texto-ayuda {
-  color: #6b7280;
+  color: var(--color-texto-secundario);
   font-size: 13px;
   margin-top: -6px;
   margin-bottom: 16px;
@@ -72,7 +133,7 @@ body {
 }
 
 .tarjeta {
-  background: white;
+  background: var(--color-superficie);
   border-radius: 8px;
   padding: 24px;
   margin-bottom: 20px;
@@ -94,7 +155,7 @@ body {
 
 .filtro label {
   font-size: 14px;
-  color: #4b5563;
+  color: var(--color-texto-secundario);
 }
 
 select,
@@ -104,9 +165,11 @@ input[type='email'],
 input[type='password'],
 input[type='date'] {
   padding: 8px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-input-borde);
   border-radius: 6px;
   font-size: 14px;
+  background-color: var(--color-input-fondo);
+  color: var(--color-texto);
 }
 
 .boton {
@@ -118,25 +181,25 @@ input[type='date'] {
 }
 
 .boton-primario {
-  background-color: #1e3a5f;
+  background-color: var(--color-marca);
   color: white;
 }
 
 .boton-primario:hover {
-  background-color: #16304d;
+  background-color: var(--color-marca-hover);
 }
 
 .boton-secundario {
-  background-color: #e5e7eb;
-  color: #1f2937;
+  background-color: var(--color-secundario-fondo);
+  color: var(--color-secundario-texto);
   margin-left: 8px;
 }
 
 .boton-chico {
   padding: 5px 10px;
   font-size: 13px;
-  background-color: #eef2ff;
-  color: #1e3a5f;
+  background-color: var(--color-chico-fondo);
+  color: var(--color-chico-texto);
 }
 
 .fila-form {
@@ -149,11 +212,34 @@ input[type='date'] {
 .fila-form label {
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-texto);
+}
+
+.grupo-checkboxes,
+.grupo-radio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.opcion-checkbox,
+.opcion-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--color-texto);
+  cursor: pointer;
+}
+
+.opcion-checkbox input,
+.opcion-radio input {
+  cursor: pointer;
 }
 
 .fila-form small {
-  color: #6b7280;
+  color: var(--color-texto-secundario);
   font-size: 12px;
 }
 
@@ -170,12 +256,12 @@ input[type='date'] {
 .tabla-clientes td {
   text-align: left;
   padding: 10px 8px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-borde);
   font-size: 14px;
 }
 
 .tabla-clientes th {
-  color: #6b7280;
+  color: var(--color-texto-secundario);
   font-weight: 600;
   font-size: 12px;
   text-transform: uppercase;
@@ -183,7 +269,7 @@ input[type='date'] {
 
 .sin-datos {
   text-align: center;
-  color: #9ca3af;
+  color: var(--color-texto-secundario);
   padding: 20px 0;
 }
 
@@ -195,13 +281,13 @@ input[type='date'] {
 }
 
 .mensaje-exito {
-  background-color: #dcfce7;
-  color: #166534;
+  background-color: var(--color-exito-fondo);
+  color: var(--color-exito-texto);
 }
 
 .mensaje-error {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: var(--color-error-fondo);
+  color: var(--color-error-texto);
 }
 
 .oculto {
@@ -209,7 +295,7 @@ input[type='date'] {
 }
 
 .fecha-vencida {
-  color: #b91c1c;
+  color: var(--color-vencido);
   font-weight: 600;
 }
 
@@ -231,19 +317,27 @@ input[type='date'] {
 }
 
 .badge-verde {
-  background-color: #dcfce7;
-  color: #166534;
+  background-color: var(--color-exito-fondo);
+  color: var(--color-exito-texto);
 }
 
 .badge-rojo {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: var(--color-error-fondo);
+  color: var(--color-error-texto);
 }
 
 .vista-login {
   display: flex;
   justify-content: center;
   padding: 60px 24px;
+}
+
+/* `.oculto` está declarado antes en este archivo con la misma
+   especificidad (una sola clase); sin esta regla, `.vista-login`
+   ganaba la cascada y la pantalla de login nunca se ocultaba
+   después de loguearse. */
+.vista-login.oculto {
+  display: none;
 }
 
 .tarjeta-login {
@@ -257,8 +351,8 @@ input[type='date'] {
   align-items: center;
   gap: 12px;
   padding: 10px 32px;
-  background-color: white;
-  border-bottom: 1px solid #e5e7eb;
+  background-color: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
   font-size: 13px;
-  color: #4b5563;
+  color: var(--color-texto-secundario);
 }

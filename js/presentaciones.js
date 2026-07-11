@@ -21,37 +21,43 @@ const elSinPresentaciones = document.getElementById('sin-presentaciones');
 const elPresentacionesMensaje = document.getElementById('presentaciones-mensaje');
 
 // Crea (si todavía no existe) el registro "pendiente" del período vigente
-// para cada cliente + obligación automática. Si ya existe -sea pendiente
-// o ya presentado-, no lo toca.
+// para cada obligación que el contador le asignó a cada cliente (tabla
+// cliente_obligaciones, configurada desde la pantalla de Clientes). Las
+// obligaciones "manual" (IDU) quedan afuera, aunque estén asignadas. Si el
+// registro ya existe -sea pendiente o ya presentado-, no lo toca.
 async function asegurarPresentacionesDelPeriodoVigente() {
   const [
     { data: clientes, error: errorClientes },
-    { data: obligaciones, error: errorObligaciones },
+    { data: clienteObligaciones, error: errorClienteObligaciones },
   ] = await Promise.all([
     supabasePresentaciones.from('clientes').select('id, cierre_fiscal_mes'),
-    supabasePresentaciones.from('obligaciones').select('*').neq('periodicidad', 'manual'),
+    supabasePresentaciones.from('cliente_obligaciones').select('cliente_id, obligaciones(id, periodicidad)'),
   ]);
 
   if (errorClientes) throw errorClientes;
-  if (errorObligaciones) throw errorObligaciones;
+  if (errorClienteObligaciones) throw errorClienteObligaciones;
 
+  const clientesPorId = new Map((clientes || []).map((c) => [c.id, c]));
   const registrosACrear = [];
 
-  for (const cliente of clientes || []) {
+  for (const fila of clienteObligaciones || []) {
+    const cliente = clientesPorId.get(fila.cliente_id);
+    const obligacion = fila.obligaciones;
+
+    if (!cliente || !obligacion) continue;
+    if (obligacion.periodicidad === 'manual') continue;
+
     const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
+    const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
 
-    for (const obligacion of obligaciones || []) {
-      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
-
-      registrosACrear.push({
-        cliente_id: cliente.id,
-        obligacion_id: obligacion.id,
-        periodo: formatearFechaISO(periodoAncla),
-        // No mandamos estado/fecha_presentacion: usan los valores por
-        // defecto de la tabla ('pendiente' y null). Si el registro ya
-        // existía como "presentado", el upsert de abajo no lo pisa.
-      });
-    }
+    registrosACrear.push({
+      cliente_id: cliente.id,
+      obligacion_id: obligacion.id,
+      periodo: formatearFechaISO(periodoAncla),
+      // No mandamos estado/fecha_presentacion: usan los valores por
+      // defecto de la tabla ('pendiente' y null). Si el registro ya
+      // existía como "presentado", el upsert de abajo no lo pisa.
+    });
   }
 
   if (registrosACrear.length === 0) return;

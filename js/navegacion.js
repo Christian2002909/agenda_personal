@@ -10,18 +10,18 @@ const elBotonesNav = document.querySelectorAll('.nav-boton');
 const elVistas = document.querySelectorAll('.vista');
 
 // Cada pantalla define su propia función "cargarX()" (cargarClientes,
-// cargarObligaciones, cargarCalendario, etc.) para traer sus datos de
+// cargarCalendario, cargarHonorarios, etc.) para traer sus datos de
 // Supabase. Como esas funciones quedan disponibles en "window" (por ser
 // declaradas en scripts sueltos, no módulos), acá las volvemos a llamar
 // cada vez que el usuario entra a esa pestaña, para que siempre muestre
 // datos actualizados y no lo que había cuando se abrió la app.
 const FUNCION_DE_RECARGA_POR_VISTA = {
   'vista-clientes': 'cargarClientes',
-  'vista-obligaciones': 'cargarObligaciones',
   'vista-calendario': 'cargarCalendario',
   'vista-presentaciones': 'cargarPresentaciones',
   'vista-historial': 'cargarHistorial',
   'vista-honorarios': 'cargarHonorarios',
+  'vista-configuracion': 'cargarConfiguracion',
 };
 
 function mostrarVista(nombreVista) {

@@ -30,56 +30,61 @@ const elTablaCalendarioBody = document.getElementById('tabla-calendario-body');
 const elSinVencimientos = document.getElementById('sin-vencimientos');
 const elCalendarioMensaje = document.getElementById('calendario-mensaje');
 
-// Revisa cliente por cliente, obligación por obligación (solo las
-// automáticas), calcula el período vigente de cada una y crea el
-// registro en calendario_vencimientos si todavía no existe.
+// Revisa, para cada obligación que el contador le asignó a cada cliente
+// (tabla cliente_obligaciones, configurada desde la pantalla de Clientes),
+// si corresponde generar automáticamente el vencimiento del período
+// vigente. Las obligaciones "manual" (IDU) nunca se generan solas, aunque
+// estén asignadas al cliente.
 async function asegurarVencimientosDelPeriodoVigente() {
   const [
     { data: clientes, error: errorClientes },
-    { data: obligaciones, error: errorObligaciones },
+    { data: clienteObligaciones, error: errorClienteObligaciones },
     { data: feriados, error: errorFeriados },
   ] = await Promise.all([
     supabaseCalendario.from('clientes').select('id, terminacion_ruc, cierre_fiscal_mes'),
-    supabaseCalendario.from('obligaciones').select('*').neq('periodicidad', 'manual'),
+    supabaseCalendario.from('cliente_obligaciones').select('cliente_id, obligaciones(id, codigo, periodicidad)'),
     supabaseCalendario.from('feriados').select('fecha'),
   ]);
 
   if (errorClientes) throw errorClientes;
-  if (errorObligaciones) throw errorObligaciones;
+  if (errorClienteObligaciones) throw errorClienteObligaciones;
   if (errorFeriados) throw errorFeriados;
 
   const feriadosSet = new Set((feriados || []).map((f) => f.fecha));
+  const clientesPorId = new Map((clientes || []).map((c) => [c.id, c]));
   const registrosACrear = [];
 
-  for (const cliente of clientes || []) {
+  for (const fila of clienteObligaciones || []) {
+    const cliente = clientesPorId.get(fila.cliente_id);
+    const obligacion = fila.obligaciones;
+
+    if (!cliente || !obligacion) continue;
+    if (obligacion.periodicidad === 'manual') continue;
     // Si el cliente todavía no tiene cargada la terminación de RUC, no
     // podemos calcular su día de vencimiento: lo saltamos por ahora.
     if (cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined) continue;
 
     const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
+    const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
 
-    for (const obligacion of obligaciones || []) {
-      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
+    const fechaVencimiento = calcularFechaVencimiento({
+      codigoObligacion: obligacion.codigo,
+      periodicidad: obligacion.periodicidad,
+      terminacionRuc: cliente.terminacion_ruc,
+      periodoAncla,
+      feriadosSet,
+      cierreFiscalMes,
+    });
 
-      const fechaVencimiento = calcularFechaVencimiento({
-        codigoObligacion: obligacion.codigo,
-        periodicidad: obligacion.periodicidad,
-        terminacionRuc: cliente.terminacion_ruc,
-        periodoAncla,
-        feriadosSet,
-        cierreFiscalMes,
-      });
+    if (!fechaVencimiento) continue;
 
-      if (!fechaVencimiento) continue;
-
-      registrosACrear.push({
-        cliente_id: cliente.id,
-        obligacion_id: obligacion.id,
-        periodo: formatearFechaISO(periodoAncla),
-        fecha_vencimiento: formatearFechaISO(fechaVencimiento),
-        generado_manual: false,
-      });
-    }
+    registrosACrear.push({
+      cliente_id: cliente.id,
+      obligacion_id: obligacion.id,
+      periodo: formatearFechaISO(periodoAncla),
+      fecha_vencimiento: formatearFechaISO(fechaVencimiento),
+      generado_manual: false,
+    });
   }
 
   if (registrosACrear.length === 0) return;
@@ -106,9 +111,7 @@ async function cargarCalendario() {
 
     const { data, error } = await supabaseCalendario
       .from('calendario_vencimientos')
-      .select(
-        'fecha_vencimiento, periodo, clientes(razon_social), obligaciones(nombre, periodicidad)'
-      )
+      .select('fecha_vencimiento, periodo, clientes(razon_social), obligaciones(periodicidad)')
       .order('fecha_vencimiento', { ascending: true });
 
     if (error) throw error;
@@ -142,7 +145,6 @@ function dibujarTablaCalendario(filas) {
 
     tr.innerHTML = `
       <td>${escaparHtmlCalendario(fila.clientes?.razon_social)}</td>
-      <td>${escaparHtmlCalendario(fila.obligaciones?.nombre)}</td>
       <td>${formatearPeriodoVisible(fila.periodo, fila.obligaciones?.periodicidad)}</td>
       <td class="${estaVencido ? 'fecha-vencida' : ''}">${formatearFechaVisible(fila.fecha_vencimiento)}</td>
     `;

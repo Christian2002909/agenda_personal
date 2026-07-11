@@ -35,6 +35,11 @@ create table if not exists public.clientes (
     -- ESTADO FINANCIERO (en vez de asumir siempre 31/12).
     cierre_fiscal_mes   smallint not null default 12,
 
+    -- Clave de acceso del cliente al Sistema Marangatu (SET, Paraguay).
+    -- Texto plano a propósito: el estudio ya la maneja así en su Excel de
+    -- trabajo y la necesita visible de un vistazo, no oculta/encriptada.
+    clave_marangatu     text,
+
     fecha_alta          date not null default current_date,
 
     created_at          timestamptz not null default now(),
@@ -65,6 +70,9 @@ create table if not exists public.clientes (
 alter table public.clientes
     add column if not exists cierre_fiscal_mes smallint not null default 12;
 
+alter table public.clientes
+    add column if not exists clave_marangatu text;
+
 do $$
 begin
     if not exists (
@@ -84,6 +92,8 @@ comment on column public.clientes.responsable is
     'Encargado del cliente dentro del estudio (texto libre, sin FK a usuarios todavía).';
 comment on column public.clientes.cierre_fiscal_mes is
     'Mes (1-12) de cierre del ejercicio fiscal; 12 = diciembre (default). Usado por calendario-logica.js para IRE SIMPLE/GENERAL y ESTADO FINANCIERO.';
+comment on column public.clientes.clave_marangatu is
+    'Clave de acceso del cliente al Sistema Marangatu (SET). Texto plano, visible en la tabla de Clientes.';
 
 -- ---------------------------------------------------------------------
 -- 2. ÍNDICES
@@ -210,6 +220,48 @@ insert into public.obligaciones (codigo, nombre, periodicidad) values
 on conflict (codigo) do update
     set nombre       = excluded.nombre,
         periodicidad = excluded.periodicidad;
+
+-- ---------------------------------------------------------------------
+-- 6.1 TABLA cliente_obligaciones — qué obligaciones (del catálogo de
+--     arriba) le corresponden a cada cliente. Se configura a mano desde
+--     la pantalla de Clientes (checkboxes), reemplaza la suposición
+--     anterior de que TODOS los clientes tenían todas las obligaciones
+--     automáticas. El Calendario y Presentaciones solo generan registros
+--     para las combinaciones que existen acá.
+-- ---------------------------------------------------------------------
+create table if not exists public.cliente_obligaciones (
+    id             bigint generated always as identity primary key,
+
+    cliente_id     bigint not null
+                       references public.clientes(id) on delete cascade,
+
+    obligacion_id  bigint not null
+                       references public.obligaciones(id) on delete cascade,
+
+    created_at     timestamptz not null default now(),
+
+    constraint cliente_obligaciones_unique
+        unique (cliente_id, obligacion_id)
+);
+
+comment on table public.cliente_obligaciones is
+    'Qué obligaciones del catálogo le corresponden a cada cliente (configurado a mano en la pantalla de Clientes). El Calendario y Presentaciones solo generan vencimientos para estas combinaciones, no para todo el catálogo.';
+
+create index if not exists idx_cliente_obligaciones_cliente
+    on public.cliente_obligaciones (cliente_id);
+
+alter table public.cliente_obligaciones enable row level security;
+
+drop policy if exists "cliente_obligaciones_acceso_autenticados" on public.cliente_obligaciones;
+
+create policy "cliente_obligaciones_acceso_autenticados"
+    on public.cliente_obligaciones
+    for all
+    to authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.cliente_obligaciones to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 7. TABLA feriados

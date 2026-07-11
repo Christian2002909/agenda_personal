@@ -36,14 +36,30 @@ const elClienteRazonSocial = document.getElementById('cliente-razon-social');
 const elClienteTerminacionRuc = document.getElementById('cliente-terminacion-ruc');
 const elClienteTipoContribuyente = document.getElementById('cliente-tipo-contribuyente');
 const elClienteResponsable = document.getElementById('cliente-responsable');
+const elClienteClaveMarangatu = document.getElementById('cliente-clave-marangatu');
 const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-mes');
+const elClienteObligacionesCheckboxes = document.getElementById('cliente-obligaciones-checkboxes');
 
 const NOMBRES_MES_CLIENTES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+// Qué obligaciones del catálogo se marcan solas al elegir un tipo de
+// contribuyente (el contador siempre puede corregir el resultado a mano,
+// esto es solo para no partir de cero cada vez). IDU nunca se pre-marca:
+// se agrega a mano cuando corresponde (ver reglas de negocio en schema.sql).
+const OBLIGACIONES_SUGERIDAS_POR_TIPO = {
+  'IRE SIMPLE': ['IVA', 'IRE_SIMPLE'],
+  'IRE GENERAL': ['IVA', 'IRE_GENERAL', 'ESTADO_FINANCIERO'],
+};
 
 // Guardamos en memoria la última lista de clientes que llegó de Supabase,
 // para poder armar el filtro de responsables y abrir la edición sin tener
 // que volver a pedirle los datos al servidor.
 let clientesCache = [];
+
+// Catálogo de obligaciones (para armar los checkboxes) y, mientras se
+// edita un cliente existente, qué obligaciones ya tiene asignadas.
+let obligacionesCache = [];
+let obligacionesDelClienteEnEdicion = new Set();
 
 // --- Mensajes para el usuario --------------------------------------------
 
@@ -78,17 +94,26 @@ async function cargarClientes() {
   }
 
   try {
-    let consulta = supabase.from('clientes').select('*').order('razon_social', { ascending: true });
+    let consultaClientes = supabase.from('clientes').select('*').order('razon_social', { ascending: true });
 
     const responsableSeleccionado = elFiltroResponsable.value;
     if (responsableSeleccionado && responsableSeleccionado !== 'todos') {
-      consulta = consulta.eq('responsable', responsableSeleccionado);
+      consultaClientes = consultaClientes.eq('responsable', responsableSeleccionado);
     }
 
-    const { data, error } = await consulta;
-    if (error) throw error;
+    const [
+      { data: clientes, error: errorClientes },
+      { data: obligaciones, error: errorObligaciones },
+    ] = await Promise.all([
+      consultaClientes,
+      supabase.from('obligaciones').select('*').order('id'),
+    ]);
 
-    clientesCache = data || [];
+    if (errorClientes) throw errorClientes;
+    if (errorObligaciones) throw errorObligaciones;
+
+    clientesCache = clientes || [];
+    obligacionesCache = obligaciones || [];
     dibujarTabla(clientesCache);
     actualizarOpcionesDeFiltro(clientesCache);
   } catch (error) {
@@ -119,6 +144,7 @@ function dibujarTabla(clientes) {
       <td>${cliente.terminacion_ruc ?? ''}</td>
       <td>${escaparHtml(cliente.tipo_contribuyente)}</td>
       <td>${escaparHtml(cliente.responsable)}</td>
+      <td>${escaparHtml(cliente.clave_marangatu)}</td>
       <td>${NOMBRES_MES_CLIENTES[(cliente.cierre_fiscal_mes ?? 12) - 1]}</td>
       <td>${formatearFecha(cliente.fecha_alta)}</td>
       <td><button class="boton boton-chico" data-id="${cliente.id}">Editar</button></td>
@@ -170,33 +196,95 @@ function actualizarOpcionesDeFiltro(clientes) {
 
 elFiltroResponsable.addEventListener('change', cargarClientes);
 
+// --- Checkboxes de obligaciones por cliente --------------------------------
+
+// Arma un checkbox por cada obligación del catálogo, tildando las que
+// están en "obligacionesSeleccionadas" (un Set de obligacion_id).
+function dibujarCheckboxesObligaciones(obligacionesSeleccionadas) {
+  elClienteObligacionesCheckboxes.innerHTML = '';
+
+  for (const obligacion of obligacionesCache) {
+    const marcado = obligacionesSeleccionadas.has(obligacion.id);
+
+    const etiqueta = document.createElement('label');
+    etiqueta.className = 'opcion-checkbox';
+    etiqueta.innerHTML = `
+      <input type="checkbox" value="${obligacion.id}" ${marcado ? 'checked' : ''} />
+      ${escaparHtml(obligacion.nombre)}
+    `;
+    elClienteObligacionesCheckboxes.appendChild(etiqueta);
+  }
+}
+
+// Sugiere qué obligaciones tildar según el tipo de contribuyente elegido
+// (ver OBLIGACIONES_SUGERIDAS_POR_TIPO). Es solo un punto de partida: el
+// contador puede tildar/destildar lo que haga falta antes de guardar.
+function obtenerObligacionesSugeridas(tipoContribuyente) {
+  const codigosSugeridos = OBLIGACIONES_SUGERIDAS_POR_TIPO[tipoContribuyente] || [];
+  const idsSugeridos = obligacionesCache
+    .filter((o) => codigosSugeridos.includes(o.codigo))
+    .map((o) => o.id);
+  return new Set(idsSugeridos);
+}
+
+// Solo autocompletamos las sugerencias mientras se está dando de ALTA un
+// cliente nuevo (sin id todavía). Si ya existe, cambiar el tipo de
+// contribuyente no debe pisar las obligaciones que el contador configuró
+// a mano.
+elClienteTipoContribuyente.addEventListener('change', () => {
+  if (elClienteId.value) return;
+  dibujarCheckboxesObligaciones(obtenerObligacionesSugeridas(elClienteTipoContribuyente.value));
+});
+
 // --- Mostrar / ocultar formulario ------------------------------------------
 
 function abrirFormularioNuevo() {
   elForm.reset();
   elClienteId.value = '';
   elFormTitulo.textContent = 'Nuevo Cliente';
+  dibujarCheckboxesObligaciones(new Set());
   elFormContenedor.classList.remove('oculto');
   elClienteRuc.focus();
 }
 
-function abrirFormularioEdicion(cliente) {
+async function abrirFormularioEdicion(cliente) {
   elClienteId.value = cliente.id;
   elClienteRuc.value = cliente.ruc;
   elClienteRazonSocial.value = cliente.razon_social;
   elClienteTerminacionRuc.value = cliente.terminacion_ruc ?? '';
   elClienteTipoContribuyente.value = cliente.tipo_contribuyente;
   elClienteResponsable.value = cliente.responsable;
+  elClienteClaveMarangatu.value = cliente.clave_marangatu ?? '';
   elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
+  dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
   elFormContenedor.classList.remove('oculto');
   elClienteRuc.focus();
+
+  try {
+    const { data, error } = await supabase
+      .from('cliente_obligaciones')
+      .select('obligacion_id')
+      .eq('cliente_id', cliente.id);
+
+    if (error) throw error;
+
+    // Si mientras se cargaba esto el usuario ya cerró el formulario o
+    // abrió otro cliente, no pisamos lo que esté mostrando ahora.
+    if (elClienteId.value !== String(cliente.id)) return;
+
+    obligacionesDelClienteEnEdicion = new Set((data || []).map((fila) => fila.obligacion_id));
+    dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
+  } catch (error) {
+    console.error('Error al cargar las obligaciones del cliente:', error);
+  }
 }
 
 function cerrarFormulario() {
   elForm.reset();
   elFormContenedor.classList.add('oculto');
+  obligacionesDelClienteEnEdicion = new Set();
 }
 
 elBtnNuevoCliente.addEventListener('click', abrirFormularioNuevo);
@@ -230,23 +318,45 @@ elForm.addEventListener('submit', async (evento) => {
     terminacion_ruc: elClienteTerminacionRuc.value === '' ? null : Number(elClienteTerminacionRuc.value),
     tipo_contribuyente: elClienteTipoContribuyente.value,
     responsable: elClienteResponsable.value.trim(),
+    clave_marangatu: elClienteClaveMarangatu.value.trim() || null,
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
   };
 
   const idExistente = elClienteId.value;
+  const obligacionesSeleccionadas = [...elClienteObligacionesCheckboxes.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((input) => Number(input.value));
 
   try {
-    let error;
+    let clienteId;
 
     if (idExistente) {
       // Ya hay un id: estamos editando un cliente que ya estaba guardado.
-      ({ error } = await supabase.from('clientes').update(datosCliente).eq('id', idExistente));
+      const { error } = await supabase.from('clientes').update(datosCliente).eq('id', idExistente);
+      if (error) throw error;
+      clienteId = Number(idExistente);
     } else {
       // No hay id: es un cliente nuevo.
-      ({ error } = await supabase.from('clientes').insert(datosCliente));
+      const { data, error } = await supabase.from('clientes').insert(datosCliente).select('id').single();
+      if (error) throw error;
+      clienteId = data.id;
     }
 
-    if (error) throw error;
+    // Reemplazamos las obligaciones asignadas: borramos todas las de este
+    // cliente y volvemos a insertar las que quedaron tildadas. Son pocas
+    // filas como mucho (una por obligación del catálogo), así que es más
+    // simple que comparar diferencias contra lo que había antes.
+    const { error: errorBorrarObligaciones } = await supabase
+      .from('cliente_obligaciones')
+      .delete()
+      .eq('cliente_id', clienteId);
+    if (errorBorrarObligaciones) throw errorBorrarObligaciones;
+
+    if (obligacionesSeleccionadas.length > 0) {
+      const { error: errorInsertarObligaciones } = await supabase
+        .from('cliente_obligaciones')
+        .insert(obligacionesSeleccionadas.map((obligacionId) => ({ cliente_id: clienteId, obligacion_id: obligacionId })));
+      if (errorInsertarObligaciones) throw errorInsertarObligaciones;
+    }
 
     mostrarMensaje(idExistente ? 'Cliente actualizado correctamente.' : 'Cliente creado correctamente.');
     cerrarFormulario();
@@ -268,12 +378,12 @@ elForm.addEventListener('submit', async (evento) => {
 // En vez de agregar un listener a cada botón "Editar" (que se crean y
 // destruyen todo el tiempo), escuchamos los clicks en toda la tabla y
 // revisamos si el click vino de un botón con data-id.
-elTablaBody.addEventListener('click', (evento) => {
+elTablaBody.addEventListener('click', async (evento) => {
   const boton = evento.target.closest('button[data-id]');
   if (!boton) return;
 
   const cliente = clientesCache.find((c) => String(c.id) === boton.dataset.id);
-  if (cliente) abrirFormularioEdicion(cliente);
+  if (cliente) await abrirFormularioEdicion(cliente);
 });
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda

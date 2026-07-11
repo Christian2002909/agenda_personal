@@ -16,21 +16,23 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 
 | Fase | Pantalla | Qué hace |
 |---|---|---|
-| 1 | Clientes | Alta, edición, listado, filtro por responsable |
-| 2 | Obligaciones | Catálogo fijo precargado: IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IDU |
-| 3 | Calendario | Genera y muestra los vencimientos calculados según terminación de RUC. Se actualiza solo, nunca hay que recrearlo a mano |
-| 4 | Presentaciones | Checkbox por Cliente + Obligación + Período vigente, con fecha automática al marcar |
+| 1 | Clientes | Alta, edición, listado, filtro por responsable. Cada cliente tiene además clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes, ver abajo) |
+| 2 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
+| 3 | Calendario | Genera y muestra los vencimientos calculados según terminación de RUC, **solo para las obligaciones que cada cliente tiene asignadas**. Se actualiza solo, nunca hay que recrearlo a mano |
+| 4 | Presentaciones | Checkbox por Cliente + Obligación asignada + Período vigente, con fecha automática al marcar |
 | 5 | Historial | Todo lo presentado alguna vez, orden cronológico, sin agrupar |
-| 6 | Honorarios | Monto pactado por cliente, registro de pagos, estado "Al día"/"Debe" calculado en el momento |
+| 6 | Honorarios | Monto pactado por cliente, registro de pagos, estado "Al día"/"Debe" con deuda acumulada |
+| 7 | Configuración | Tema claro/oscuro, guardado por computadora (localStorage) |
 
 ## Cómo levantar el proyecto en una PC nueva
 
 1. Clonar el repositorio.
-2. `npm install`
-3. Copiar `.env.example` como `.env` y completar con las credenciales reales de Supabase (Project Settings → API Keys en supabase.com → "Clave publicable" `sb_publishable_...` es la que va en `SUPABASE_ANON_KEY`). **El archivo `.env` nunca se sube a git.**
-4. Volver a correr `schema.sql` completo en el SQL Editor de Supabase (es idempotente: agrega lo nuevo — `cierre_fiscal_mes`, tabla `perfiles`, RLS endurecida — sin duplicar lo que ya existía).
-5. Crear al menos un usuario en Authentication → Users del dashboard de Supabase (la app ya no acepta acceso anónimo, ver "Login" abajo).
-6. `npm start`
+2. **Node.js v22.12 o superior** (LTS más reciente recomendado). Electron necesita esta versión para poder descargarse a sí mismo la primera vez (`npm install`/`npm start` fallan con `ERR_REQUIRE_ESM` en Node más viejo, ej. v20).
+3. `npm install`
+4. Copiar `.env.example` como `.env` y completar con las credenciales reales de Supabase (Project Settings → API Keys en supabase.com → "Clave publicable" `sb_publishable_...` es la que va en `SUPABASE_ANON_KEY`). **El archivo `.env` nunca se sube a git.**
+5. Volver a correr `schema.sql` completo en el SQL Editor de Supabase (es idempotente: agrega lo nuevo — `cierre_fiscal_mes`, `clave_marangatu`, tabla `cliente_obligaciones`, tabla `perfiles`, RLS endurecida — sin duplicar lo que ya existía).
+6. Crear al menos un usuario en Authentication → Users del dashboard de Supabase (la app ya no acepta acceso anónimo, ver "Login" abajo).
+7. `npm start`
 
 ## Estructura de archivos
 
@@ -43,13 +45,13 @@ js/auth.js                   Login/logout con Supabase Auth. Muestra #vista-logi
                               según haya sesión o no. No hay alta de usuarios desde la app.
 js/navegacion.js             Muestra/oculta las vistas al hacer clic en el menú, y vuelve a pedir los
                               datos de esa pantalla (llama a window.cargarX())
-js/clientes.js               Pantalla Clientes
-js/obligaciones.js           Pantalla Obligaciones (solo lectura)
+js/clientes.js               Pantalla Clientes (incluye clave Marangatu y checkboxes de obligaciones)
 js/calendario-logica.js      Funciones puras de cálculo de fechas (día por RUC, ajuste por feriado, etc.)
-js/calendario.js             Pantalla Calendario (usa calendario-logica.js)
-js/presentaciones.js         Pantalla Presentaciones (usa calendario-logica.js)
+js/calendario.js             Pantalla Calendario (usa calendario-logica.js, filtra por cliente_obligaciones)
+js/presentaciones.js         Pantalla Presentaciones (usa calendario-logica.js, filtra por cliente_obligaciones)
 js/historial.js              Pantalla Historial
 js/honorarios.js             Pantalla Honorarios
+js/configuracion.js          Pantalla Configuración (tema claro/oscuro, aplica data-theme en <html>)
 schema.sql                  Todo el esquema de la base de datos (Supabase/Postgres), con comentarios
 .env.example                 Plantilla de credenciales (copiar a .env y completar)
 ```
@@ -74,6 +76,25 @@ Ver también `schema.sql`, sección "8.1 REGLAS DE NEGOCIO".
 - **Cierre fiscal personalizado por cliente** (`clientes.cierre_fiscal_mes`, 1-12, default 12 = diciembre): `calendario-logica.js` calcula el vencimiento como "N meses después del mes de cierre" (N=3 para IRE SIMPLE, N=4 para IRE GENERAL/ESTADO FINANCIERO), y el "período vigente" como el ejercicio que cerró más recientemente según la fecha de hoy. Con cierre en diciembre esto da exactamente el comportamiento original (marzo/abril del año siguiente).
 - **Feriados**: no vienen precargados. Paraguay tiene feriados fijos + hasta 3 adicionales por decreto que cambian cada año, así que hay que cargarlos a mano en la tabla `feriados` de Supabase a medida que se conocen (justo como lo pidió el usuario).
 
+## Obligaciones por cliente (tabla cliente_obligaciones)
+
+Antes, el Calendario y Presentaciones asumían que TODOS los clientes tenían todas las obligaciones automáticas (IVA + IRE SIMPLE/GENERAL + ESTADO FINANCIERO), sin mirar si correspondía. Ahora cada cliente tiene una lista explícita de qué obligaciones le corresponden (tabla `cliente_obligaciones`, configurada con checkboxes en la pantalla de Clientes):
+
+- Al elegir el **tipo de contribuyente** en un cliente nuevo, se pre-marcan solas las obligaciones típicas de ese tipo (`OBLIGACIONES_SUGERIDAS_POR_TIPO` en `clientes.js`) — el contador puede tildar/destildar lo que haga falta (agregar IDU, sacar alguna, etc.) antes de guardar.
+- Editar el tipo de contribuyente de un cliente YA GUARDADO no pisa sus obligaciones configuradas a mano.
+- Al guardar, se reemplazan todas las filas de `cliente_obligaciones` de ese cliente por las que quedaron tildadas (se borra todo y se reinserta; son pocas filas, no vale la pena comparar diferencias).
+- Calendario y Presentaciones ahora recorren `cliente_obligaciones` (en vez de cliente × catálogo completo) para decidir qué vencimientos/presentaciones generar. IDU sigue sin generarse nunca automáticamente aunque esté tildado (periodicidad "manual").
+- La pantalla de catálogo de Obligaciones (antes Fase 2, de solo lectura) se sacó del menú: ya no aporta nada que no esté en el formulario de Clientes.
+- El Calendario ya no muestra la columna "Obligación" (pedido explícito del usuario); Presentaciones e Historial sí la siguen mostrando.
+
+## Clave de Marangatu
+
+Cada cliente tiene un campo `clave_marangatu` (texto plano, visible en la tabla de Clientes) — es la clave de acceso al Sistema Marangatu (SET) de ese contribuyente, igual que en el Excel que usaba el estudio antes de esta app. A propósito no está oculta ni encriptada: el pedido explícito fue que se vea de un vistazo.
+
+## Tema claro/oscuro
+
+`js/configuracion.js` guarda la preferencia en `localStorage` (por computadora, no por usuario de Supabase) y aplica `data-theme="oscuro"` en `<html>`. Todos los colores de `css/style.css` están en variables CSS (`--color-*`) definidas en `:root` y sobreescritas en `:root[data-theme='oscuro']`; si se agrega un color nuevo a algún estilo, tiene que usar una variable existente (o agregar una nueva en ambos bloques), nunca un color fijo, para no romper el tema oscuro.
+
 ## Login (Supabase Auth)
 
 La app pide email/contraseña al arrancar (`js/auth.js`, sección `#vista-login` de `index.html`). No hay pantalla de alta de usuarios: se crean a mano en el dashboard de Supabase (Authentication → Users). Mientras no haya sesión válida, RLS rechaza cualquier consulta a la base (la seguridad real está en `schema.sql`, no en el frontend).
@@ -84,11 +105,14 @@ Acumula TODA la deuda desde que se configuró el honorario de ese cliente (`hono
 
 ## Pendientes / próximos pasos
 
-1. Empaquetar la app como `.exe` instalable con `electron-builder` (hoy solo corre en modo desarrollo con `npm start`). Deliberadamente dejado para el final, después de terminar y probar bien todo lo demás en modo desarrollo.
-2. Si más adelante se necesita distinguir permisos por rol (admin vs responsable), usar la columna `perfiles.rol` para escribir policies más finas (hoy cualquier autenticado tiene acceso total — ver sección 5/14 de `schema.sql`).
-3. Evaluar agregar un flujo de invitación/alta de usuarios desde la propia app (hoy se crean a mano en el dashboard de Supabase).
+1. Empaquetar la app como `.exe` instalable con `electron-builder` (hoy solo corre en modo desarrollo con `npm start`). Deliberadamente dejado para el final, después de terminar y probar bien todo lo demás en modo desarrollo. Para esto, las credenciales de Supabase van EMPAQUETADAS dentro del instalador (no un `.env` que cada usuario complete a mano) — la clave publicable está pensada para eso, y la seguridad real sigue estando en el login + RLS.
+2. Posición del menú de navegación configurable (izquierda/arriba/abajo/derecha) — pedido por el usuario pero marcado como secundario, se hace después de lo demás.
+3. Si más adelante se necesita distinguir permisos por rol (admin vs responsable), usar la columna `perfiles.rol` para escribir policies más finas (hoy cualquier autenticado tiene acceso total — ver sección 5/14 de `schema.sql`).
+4. Evaluar agregar un flujo de invitación/alta de usuarios desde la propia app (hoy se crean a mano en el dashboard de Supabase).
 
 > Nota: la Fase 4 (Presentaciones) no tenía ningún problema real — el comentario anterior sobre "revisar Fase 4" fue una falsa alarma, confirmada con el usuario.
+
+> Nota técnica: la pantalla de login tenía un bug de CSS (`.vista-login { display: flex }` empatada en especificidad con `.oculto { display: none }`, y como estaba declarada después en el archivo, ganaba la cascada y el login nunca se ocultaba después de loguearse). Se arregló agregando `.vista-login.oculto { display: none }`, más específico. Ojo con esto al agregar estilos nuevos a una vista que ya tiene su propia clase de layout además de `vista`/`oculto`.
 
 ## Agentes de desarrollo (agency-agents)
 
