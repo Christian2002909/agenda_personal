@@ -38,6 +38,15 @@ create table if not exists public.clientes (
     -- trabajo y la necesita visible de un vistazo, no oculta/encriptada.
     clave_marangatu     text,
 
+    -- Membrete personalizado para la ficha de pago de ESTE cliente en
+    -- particular (nombre del estudio/oficina, dirección, teléfono). Todos
+    -- opcionales: si están en null, la ficha usa el membrete general de
+    -- `configuracion_estudio`. Sirve para estudios con varias sucursales u
+    -- oficinas que atienden distintos clientes con membretes distintos.
+    membrete_nombre     text,
+    membrete_direccion  text,
+    membrete_telefono   text,
+
     fecha_alta          date not null default current_date,
 
     created_at          timestamptz not null default now(),
@@ -68,6 +77,15 @@ alter table public.clientes
 alter table public.clientes
     add column if not exists clave_marangatu text;
 
+alter table public.clientes
+    add column if not exists membrete_nombre text;
+
+alter table public.clientes
+    add column if not exists membrete_direccion text;
+
+alter table public.clientes
+    add column if not exists membrete_telefono text;
+
 -- "Tipo de Contribuyente" quedó redundante desde que cada cliente elige a
 -- mano qué obligaciones le corresponden (tabla cliente_obligaciones, ver
 -- sección 6.1): antes se usaba solo para sugerir esas obligaciones. Se
@@ -97,6 +115,8 @@ comment on column public.clientes.cierre_fiscal_mes is
     'Mes de cierre del ejercicio fiscal: 12 = diciembre (regla general), 4 = abril, 6 = junio (excepciones del Decreto 3182/2019). Usado por calendario-logica.js para IRE SIMPLE/GENERAL, ESTADO FINANCIERO, IRP-RSP e IRP-RGC.';
 comment on column public.clientes.clave_marangatu is
     'Clave de acceso del cliente al Sistema Marangatu (SET). Texto plano, visible en la tabla de Clientes.';
+comment on column public.clientes.membrete_nombre is
+    'Nombre de estudio/oficina a usar en la ficha de pago de este cliente en particular. Si es null, se usa el de configuracion_estudio.';
 
 -- ---------------------------------------------------------------------
 -- 2. ÍNDICES
@@ -449,65 +469,142 @@ create index if not exists idx_presentaciones_pendientes
 -- 10. TABLA honorarios
 -- ---------------------------------------------------------------------
 create table if not exists public.honorarios (
-    id            bigint generated always as identity primary key,
+    id             bigint generated always as identity primary key,
 
-    cliente_id    bigint not null
+    cliente_id     bigint not null
                        references public.clientes(id) on delete cascade,
 
-    -- Monto pactado en guaraníes. numeric(14,0): sin decimales (el Gs. no
-    -- usa centavos en la práctica de este estudio) y con margen amplio
-    -- (hasta 99.999.999.999.999 Gs.).
-    monto         numeric(14, 0) not null,
+    -- Un cliente puede tener cuota mensual, anual, o ambas a la vez (ej:
+    -- 110.000 Gs/mes de honorario recurrente + 150.000 Gs/año por la
+    -- presentación anual de IVA/IRE). Ambas son opcionales, pero tiene que
+    -- haber al menos una cargada (ver constraint). numeric(14,0): sin
+    -- decimales (el Gs. no usa centavos en la práctica de este estudio).
+    monto_mensual  numeric(14, 0),
+    monto_anual    numeric(14, 0),
 
-    periodicidad  text not null,
-
-    created_at    timestamptz not null default now(),
-    updated_at    timestamptz not null default now(),
+    created_at     timestamptz not null default now(),
+    updated_at     timestamptz not null default now(),
 
     constraint honorarios_cliente_unique
         unique (cliente_id),
 
-    constraint honorarios_monto_positivo
-        check (monto > 0),
+    constraint honorarios_monto_mensual_positivo
+        check (monto_mensual is null or monto_mensual > 0),
 
-    constraint honorarios_periodicidad_valida
-        check (periodicidad in ('mensual', 'anual'))
+    constraint honorarios_monto_anual_positivo
+        check (monto_anual is null or monto_anual > 0),
+
+    constraint honorarios_al_menos_un_monto
+        check (monto_mensual is not null or monto_anual is not null)
 );
 
+-- Migración para bases ya existentes con el esquema viejo (monto +
+-- periodicidad, un solo monto por cliente). Antes de borrar esas columnas,
+-- se traslada el dato que tuvieran a la columna nueva que corresponda.
+alter table public.honorarios add column if not exists monto_mensual numeric(14, 0);
+alter table public.honorarios add column if not exists monto_anual numeric(14, 0);
+
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'honorarios' and column_name = 'periodicidad'
+    ) then
+        update public.honorarios set monto_mensual = monto where periodicidad = 'mensual' and monto_mensual is null;
+        update public.honorarios set monto_anual = monto where periodicidad = 'anual' and monto_anual is null;
+    end if;
+end $$;
+
+alter table public.honorarios drop column if exists monto;
+alter table public.honorarios drop column if exists periodicidad;
+
+alter table public.honorarios drop constraint if exists honorarios_monto_positivo;
+alter table public.honorarios drop constraint if exists honorarios_periodicidad_valida;
+
+alter table public.honorarios drop constraint if exists honorarios_monto_mensual_positivo;
+alter table public.honorarios add constraint honorarios_monto_mensual_positivo
+    check (monto_mensual is null or monto_mensual > 0);
+
+alter table public.honorarios drop constraint if exists honorarios_monto_anual_positivo;
+alter table public.honorarios add constraint honorarios_monto_anual_positivo
+    check (monto_anual is null or monto_anual > 0);
+
+alter table public.honorarios drop constraint if exists honorarios_al_menos_un_monto;
+alter table public.honorarios add constraint honorarios_al_menos_un_monto
+    check (monto_mensual is not null or monto_anual is not null);
+
 comment on table public.honorarios is
-    'Honorario pactado por cliente (uno por cliente, ver unique constraint). Deliberadamente NO tiene columna de estado "al día / debe": ese estado se deriva comparando esta tabla con pagos_honorarios (en la app, o en una vista futura) para que nunca quede desincronizado de los pagos reales.';
+    'Honorario pactado por cliente (uno por cliente, ver unique constraint). Monto mensual y anual son independientes, un cliente puede tener uno, otro, o ambos. Deliberadamente NO tiene columna de estado "al día / debe": ese estado se deriva comparando esta tabla con pagos_honorarios para que nunca quede desincronizado de los pagos reales.';
 
 -- ---------------------------------------------------------------------
 -- 11. TABLA pagos_honorarios
 -- ---------------------------------------------------------------------
 create table if not exists public.pagos_honorarios (
-    id            bigint generated always as identity primary key,
+    id              bigint generated always as identity primary key,
 
-    cliente_id    bigint not null
-                       references public.clientes(id) on delete cascade,
+    cliente_id      bigint not null
+                        references public.clientes(id) on delete cascade,
 
-    monto_pagado  numeric(14, 0) not null,
+    -- A cuál de las dos cuotas del cliente corresponde este pago (ver
+    -- honorarios.monto_mensual / monto_anual). Necesario porque un mismo
+    -- cliente puede deber las dos por separado.
+    tipo_honorario  text not null default 'mensual',
 
-    fecha_pago    date not null default current_date,
+    monto_pagado    numeric(14, 0) not null,
+
+    fecha_pago      date not null default current_date,
+
+    -- Cómo se cobró: importa para la ficha de pago descargable y para
+    -- conciliar caja/banco.
+    forma_pago      text not null default 'efectivo',
+
+    -- Número del recibo físico/digital emitido al cliente por este pago.
+    -- Texto libre (algunos recibos tienen letras o guiones) y opcional:
+    -- no todos los estudios numeran recibos desde el día uno.
+    numero_recibo   text,
 
     -- Período que cubre el pago (misma convención de fecha ancla que
-    -- calendario_vencimientos.periodo: primer día del mes si el cliente
-    -- tiene honorarios mensuales, 1º de enero si son anuales). Se permite
-    -- más de un pago por cliente+período (pagos parciales).
-    periodo       date not null,
+    -- calendario_vencimientos.periodo: primer día del mes si tipo_honorario
+    -- es 'mensual', 1º de enero si es 'anual'). Se permite más de un pago
+    -- por cliente+tipo+período (pagos parciales).
+    periodo         date not null,
 
-    created_at    timestamptz not null default now(),
-    updated_at    timestamptz not null default now(),
+    created_at      timestamptz not null default now(),
+    updated_at      timestamptz not null default now(),
 
     constraint pagos_honorarios_monto_positivo
-        check (monto_pagado > 0)
+        check (monto_pagado > 0),
+
+    constraint pagos_honorarios_tipo_valido
+        check (tipo_honorario in ('mensual', 'anual')),
+
+    constraint pagos_honorarios_forma_pago_valida
+        check (forma_pago in ('efectivo', 'transferencia', 'cheque'))
 );
 
-comment on table public.pagos_honorarios is
-    'Historial de pagos de honorarios por cliente. Nunca se actualiza/borra un pago histórico; los pagos parciales se registran como filas adicionales del mismo período.';
+-- Migración para bases ya existentes (la CREATE TABLE de arriba ya
+-- incluye estas columnas para instalaciones nuevas).
+alter table public.pagos_honorarios add column if not exists tipo_honorario text not null default 'mensual';
+alter table public.pagos_honorarios add column if not exists forma_pago text not null default 'efectivo';
+alter table public.pagos_honorarios add column if not exists numero_recibo text;
 
-create index if not exists idx_pagos_honorarios_cliente_periodo
-    on public.pagos_honorarios (cliente_id, periodo);
+alter table public.pagos_honorarios drop constraint if exists pagos_honorarios_tipo_valido;
+alter table public.pagos_honorarios add constraint pagos_honorarios_tipo_valido
+    check (tipo_honorario in ('mensual', 'anual'));
+
+alter table public.pagos_honorarios drop constraint if exists pagos_honorarios_forma_pago_valida;
+alter table public.pagos_honorarios add constraint pagos_honorarios_forma_pago_valida
+    check (forma_pago in ('efectivo', 'transferencia', 'cheque'));
+
+comment on table public.pagos_honorarios is
+    'Historial de pagos de honorarios por cliente. Nunca se actualiza/borra un pago histórico; los pagos parciales se registran como filas adicionales del mismo período. tipo_honorario distingue si el pago es de la cuota mensual o la anual.';
+
+-- Se recrea (en vez de "if not exists") porque el índice viejo no incluía
+-- tipo_honorario; "create index if not exists" no actualiza la definición
+-- de un índice que ya existía con menos columnas.
+drop index if exists idx_pagos_honorarios_cliente_periodo;
+create index idx_pagos_honorarios_cliente_periodo
+    on public.pagos_honorarios (cliente_id, tipo_honorario, periodo);
 
 create index if not exists idx_pagos_honorarios_cliente_fecha
     on public.pagos_honorarios (cliente_id, fecha_pago desc);
@@ -703,3 +800,53 @@ create policy "perfiles_leer_propio"
     using (id = auth.uid());
 
 grant select on public.perfiles to authenticated;
+
+-- ---------------------------------------------------------------------
+-- 16. TABLA configuracion_estudio
+-- ---------------------------------------------------------------------
+-- Membrete general (nombre, dirección, teléfono) para la ficha de pago
+-- descargable de Honorarios. Es una tabla de una sola fila (id fijo = 1,
+-- ver constraint) en vez de una fila por "configuración" porque hoy solo
+-- hay un dato de este tipo; si el estudio necesita un membrete distinto
+-- para un cliente puntual, se carga en clientes.membrete_* (sección 1) y
+-- ese pisa a este cuando la ficha se genera.
+create table if not exists public.configuracion_estudio (
+    id                smallint primary key default 1,
+
+    nombre_estudio    text,
+    direccion         text,
+    telefono          text,
+    nota_vencimiento  text default 'Vencimiento: 1 al 10 de cada mes',
+
+    updated_at        timestamptz not null default now(),
+
+    constraint configuracion_estudio_singleton
+        check (id = 1)
+);
+
+comment on table public.configuracion_estudio is
+    'Membrete general del estudio para la ficha de pago (una sola fila, id=1). Un cliente puntual puede tener su propio membrete en clientes.membrete_*, que pisa a este.';
+
+-- Fila única, creada una sola vez (si ya existe, no se toca).
+insert into public.configuracion_estudio (id)
+values (1)
+on conflict (id) do nothing;
+
+drop trigger if exists trg_configuracion_estudio_set_updated_at on public.configuracion_estudio;
+create trigger trg_configuracion_estudio_set_updated_at
+    before update on public.configuracion_estudio
+    for each row
+    execute function public.set_updated_at();
+
+alter table public.configuracion_estudio enable row level security;
+
+drop policy if exists "configuracion_estudio_acceso_autenticados" on public.configuracion_estudio;
+
+create policy "configuracion_estudio_acceso_autenticados"
+    on public.configuracion_estudio
+    for all
+    to authenticated
+    using (true)
+    with check (true);
+
+grant select, insert, update, delete on public.configuracion_estudio to authenticated;

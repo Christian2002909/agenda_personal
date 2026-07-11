@@ -29,6 +29,8 @@ const {
 const elTablaCalendarioBody = document.getElementById('tabla-calendario-body');
 const elSinVencimientos = document.getElementById('sin-vencimientos');
 const elCalendarioMensaje = document.getElementById('calendario-mensaje');
+const elSeccionAnualesNuevoEjercicio = document.getElementById('seccion-anuales-nuevo-ejercicio');
+const elTablaAnualesNuevoEjercicioBody = document.getElementById('tabla-anuales-nuevo-ejercicio-body');
 
 // Revisa, para cada obligación que el contador le asignó a cada cliente
 // (tabla cliente_obligaciones, configurada desde la pantalla de Clientes),
@@ -142,7 +144,29 @@ async function cargarCalendario() {
       return v.periodo === periodoVigenteISO;
     });
 
-    dibujarTablaCalendario(pendientes);
+    const hoy = new Date();
+
+    // La lista principal solo muestra lo que vence EN EL MES EN CURSO (no
+    // todo el período vigente): una obligación anual sigue "vigente" todo
+    // el año, pero acá no tiene sentido verla hasta que se acerque su mes
+    // real de vencimiento.
+    const venceEsteMes = pendientes.filter((v) => {
+      const fecha = new Date(`${v.fecha_vencimiento}T00:00:00`);
+      return fecha.getFullYear() === hoy.getFullYear() && fecha.getMonth() === hoy.getMonth();
+    });
+
+    // En enero, además, mostramos aparte las obligaciones ANUALES que
+    // recién arrancan su ejercicio nuevo (aunque su fecha real de
+    // vencimiento sea marzo/abril): sirve de aviso temprano de que ya hay
+    // un ejercicio nuevo para trabajar, sin esperar a que se acerque la
+    // fecha para que aparezcan en la lista principal.
+    const esEnero = hoy.getMonth() === 0;
+    const anualesNuevoEjercicio = esEnero
+      ? pendientes.filter((v) => v.obligaciones?.periodicidad === 'anual' && !venceEsteMes.includes(v))
+      : [];
+
+    dibujarTablaCalendario(venceEsteMes);
+    dibujarTablaAnualesNuevoEjercicio(anualesNuevoEjercicio);
   } catch (error) {
     console.error('Error al cargar el calendario:', error);
     if (elCalendarioMensaje) {
@@ -176,6 +200,31 @@ function dibujarTablaCalendario(filas) {
     `;
 
     elTablaCalendarioBody.appendChild(tr);
+  }
+}
+
+// Solo se llama en enero: muestra las obligaciones anuales que recién
+// entraron en su ejercicio nuevo, como aviso adelantado (su vencimiento
+// real todavía puede estar lejos, marzo/abril).
+function dibujarTablaAnualesNuevoEjercicio(filas) {
+  if (!elSeccionAnualesNuevoEjercicio || !elTablaAnualesNuevoEjercicioBody) return;
+
+  if (filas.length === 0) {
+    elSeccionAnualesNuevoEjercicio.classList.add('oculto');
+    return;
+  }
+
+  elSeccionAnualesNuevoEjercicio.classList.remove('oculto');
+  elTablaAnualesNuevoEjercicioBody.innerHTML = '';
+
+  for (const fila of filas) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escaparHtmlCalendario(fila.clientes?.razon_social)}</td>
+      <td>${formatearPeriodoVisible(fila.periodo, fila.obligaciones?.periodicidad)}</td>
+      <td>${formatearFechaVisible(fila.fecha_vencimiento)}</td>
+    `;
+    elTablaAnualesNuevoEjercicioBody.appendChild(tr);
   }
 }
 

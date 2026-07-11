@@ -31,6 +31,11 @@ const elClienteResponsable = document.getElementById('cliente-responsable');
 const elClienteClaveMarangatu = document.getElementById('cliente-clave-marangatu');
 const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-mes');
 const elClienteObligacionesCheckboxes = document.getElementById('cliente-obligaciones-checkboxes');
+const elClienteHonorarioMensual = document.getElementById('cliente-honorario-mensual');
+const elClienteHonorarioAnual = document.getElementById('cliente-honorario-anual');
+const elClienteMembreteNombre = document.getElementById('cliente-membrete-nombre');
+const elClienteMembreteDireccion = document.getElementById('cliente-membrete-direccion');
+const elClienteMembreteTelefono = document.getElementById('cliente-membrete-telefono');
 
 // Catálogo de obligaciones, para armar los checkboxes.
 let obligacionesCache = [];
@@ -129,7 +134,9 @@ function abrirFormularioNuevo() {
 // obligaciones ya asignadas se leen de "obligacionesDelClienteEnEdicion",
 // que tiene que estar seteada ANTES de llamar a esta función (ver
 // window.editarClienteDesdeOtraVista, que la carga desde Supabase).
-function abrirFormularioEdicion(cliente) {
+// "honorario" es la fila de la tabla honorarios de este cliente, o null
+// si todavía no tiene ninguna cuota configurada.
+function abrirFormularioEdicion(cliente, honorario) {
   elClienteId.value = cliente.id;
   elClienteRuc.value = cliente.ruc;
   elClienteRazonSocial.value = cliente.razon_social;
@@ -137,6 +144,11 @@ function abrirFormularioEdicion(cliente) {
   elClienteResponsable.value = cliente.responsable;
   elClienteClaveMarangatu.value = cliente.clave_marangatu ?? '';
   elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
+  elClienteHonorarioMensual.value = honorario?.monto_mensual ?? '';
+  elClienteHonorarioAnual.value = honorario?.monto_anual ?? '';
+  elClienteMembreteNombre.value = cliente.membrete_nombre ?? '';
+  elClienteMembreteDireccion.value = cliente.membrete_direccion ?? '';
+  elClienteMembreteTelefono.value = cliente.membrete_telefono ?? '';
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
   dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
@@ -174,7 +186,13 @@ elForm.addEventListener('submit', async (evento) => {
     responsable: elClienteResponsable.value.trim(),
     clave_marangatu: elClienteClaveMarangatu.value.trim() || null,
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
+    membrete_nombre: elClienteMembreteNombre.value.trim() || null,
+    membrete_direccion: elClienteMembreteDireccion.value.trim() || null,
+    membrete_telefono: elClienteMembreteTelefono.value.trim() || null,
   };
+
+  const montoMensual = elClienteHonorarioMensual.value === '' ? null : Number(elClienteHonorarioMensual.value);
+  const montoAnual = elClienteHonorarioAnual.value === '' ? null : Number(elClienteHonorarioAnual.value);
 
   const idExistente = elClienteId.value;
   const obligacionesSeleccionadas = [...elClienteObligacionesCheckboxes.querySelectorAll('input[type="checkbox"]:checked')]
@@ -212,6 +230,23 @@ elForm.addEventListener('submit', async (evento) => {
       if (errorInsertarObligaciones) throw errorInsertarObligaciones;
     }
 
+    // Honorario: si no se cargó ni cuota mensual ni anual, no dejamos fila
+    // en honorarios (la tabla exige al menos una); si ya existía, la
+    // borramos. Si se cargó alguna, upsert (la tabla tiene unique por
+    // cliente_id, así que reemplaza la fila existente si la había).
+    if (montoMensual === null && montoAnual === null) {
+      const { error: errorBorrarHonorario } = await supabase.from('honorarios').delete().eq('cliente_id', clienteId);
+      if (errorBorrarHonorario) throw errorBorrarHonorario;
+    } else {
+      const { error: errorHonorario } = await supabase
+        .from('honorarios')
+        .upsert(
+          { cliente_id: clienteId, monto_mensual: montoMensual, monto_anual: montoAnual },
+          { onConflict: 'cliente_id' }
+        );
+      if (errorHonorario) throw errorHonorario;
+    }
+
     mostrarMensaje(idExistente ? 'Cliente actualizado correctamente.' : 'Cliente creado correctamente.');
     abrirFormularioNuevo();
   } catch (error) {
@@ -240,24 +275,27 @@ window.editarClienteDesdeOtraVista = async function editarClienteDesdeOtraVista(
       { data: obligacionesCatalogo, error: errorObligacionesCatalogo },
       { data: cliente, error: errorCliente },
       { data: obligacionesDelCliente, error: errorObligacionesDelCliente },
+      { data: honorario, error: errorHonorario },
     ] = await Promise.all([
       obligacionesCache.length > 0
         ? Promise.resolve({ data: obligacionesCache, error: null })
         : supabase.from('obligaciones').select('*').order('id'),
       supabase.from('clientes').select('*').eq('id', clienteId).single(),
       supabase.from('cliente_obligaciones').select('obligacion_id').eq('cliente_id', clienteId),
+      supabase.from('honorarios').select('monto_mensual, monto_anual').eq('cliente_id', clienteId).maybeSingle(),
     ]);
 
     if (errorObligacionesCatalogo) throw errorObligacionesCatalogo;
     if (errorCliente) throw errorCliente;
     if (errorObligacionesDelCliente) throw errorObligacionesDelCliente;
+    if (errorHonorario) throw errorHonorario;
 
     obligacionesCache = obligacionesCatalogo || [];
     obligacionesDelClienteEnEdicion = new Set((obligacionesDelCliente || []).map((fila) => fila.obligacion_id));
 
     ignorarProximaCarga = true;
     window.mostrarVista('vista-clientes');
-    abrirFormularioEdicion(cliente);
+    abrirFormularioEdicion(cliente, honorario);
   } catch (error) {
     console.error('Error al abrir el cliente para editar:', error);
     mostrarMensaje('No se pudo abrir el cliente para editar.', 'error');
