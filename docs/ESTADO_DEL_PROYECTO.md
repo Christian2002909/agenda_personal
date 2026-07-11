@@ -19,10 +19,10 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 | 1 | Presentaciones | **Pantalla principal (se abre primero al entrar)**. Filtro por Obligación (arranca en IVA), clientes agrupados por "VENCIMIENTO N - FECHA D" según terminación de RUC — igual que la planilla de control en Excel que usaba el estudio. Checkbox de presentado con fecha automática, y un link en cada cliente para editarlo (abre la pestaña Clientes) |
 | 2 | Clientes | Ahora es **solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes). Ya no tiene "Tipo de Contribuyente" (se sacó de la app y de la base, quedó redundante) |
 | 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
-| 4 | Calendario | Genera los vencimientos del **período VIGENTE únicamente** (se limpia solo cada mes/año, no acumula), solo para las obligaciones que cada cliente tiene asignadas, y solo muestra lo que todavía no se presentó. Se actualiza solo, nunca hay que recrearlo a mano |
+| 4 | Calendario | Solo muestra lo que **vence EN EL MES EN CURSO** (no todo el período vigente) y todavía no se presentó. En **enero** aparece además una sección aparte con las obligaciones anuales que recién entraron en ejercicio nuevo (aviso adelantado, aunque su vencimiento real sea marzo/abril). Se actualiza solo, nunca hay que recrearlo a mano |
 | 5 | Historial | Filtro por Obligación (igual que Presentaciones), agrupado por vencimiento. Para IVA (mensual): grilla del año completo mes por mes con la fecha exacta de vencimiento, verde/rojo/gris. Para las anuales: una fila por año (actual y anterior) con fecha exacta y estado |
-| 6 | Honorarios | Monto pactado por cliente, registro de pagos, estado "Al día"/"Debe" con deuda acumulada |
-| 7 | Configuración | Tema claro/oscuro, guardado por computadora (localStorage) |
+| 6 | Honorarios | Cuota mensual y/o anual por cliente (independientes, se configuran en Clientes), búsqueda por nombre/RUC, registro de pagos con forma de pago (efectivo/transferencia/cheque) y número de recibo, estado "Al día"/"Debe" con deuda acumulada, y ficha de pago descargable en PDF por cliente |
+| 7 | Configuración | Tema claro/oscuro (localStorage, por computadora) y membrete general del estudio para la ficha de pago (Supabase, compartido) |
 
 ## Cómo levantar el proyecto en una PC nueva
 
@@ -102,6 +102,23 @@ Reestructuración pedida por el usuario mostrándole cómo se veía su planilla 
 
 Antes, `js/calendario.js` mostraba TODOS los `calendario_vencimientos` no presentados, sin importar de qué período eran — con obligaciones mensuales (IVA) esto iba acumulando filas viejas sin presentar mes tras mes. Ahora, igual que Presentaciones, solo muestra el **período VIGENTE** de cada obligación (comparando contra `obtenerPeriodoVigente()`): lo de períodos anteriores, se haya presentado o no, deja de aparecer acá y solo queda visible en Historial.
 
+## Calendario: solo el mes en curso, anuales aparte en enero
+
+Antes el Calendario mostraba todo el período vigente no presentado (podía incluir una obligación anual todo el año, aunque su vencimiento real fuera recién en marzo/abril). Ahora `js/calendario.js` separa la lista en dos:
+
+- **Lista principal**: solo lo que vence dentro del mes calendario actual (compara año y mes de `fecha_vencimiento` contra hoy).
+- **"Obligaciones Anuales — Nuevo Ejercicio"** (`#seccion-anuales-nuevo-ejercicio`): sección aparte que solo aparece en **enero**, con las obligaciones anuales cuyo período vigente ya cambió de ejercicio aunque su vencimiento real (marzo/abril) todavía esté lejos — sirve de aviso temprano. El resto del año esta sección queda oculta.
+
+## Honorarios: cuota mensual y/o anual, ficha de pago en PDF
+
+Rediseño completo pedido comparando con el Excel real del estudio ("Control de Honorarios").
+
+- **Cuota independiente mensual y anual** (`honorarios.monto_mensual` / `monto_anual`, ambas nullable, al menos una obligatoria): un cliente puede tener las dos a la vez (ej. IVA con IRE: mensualidad + cuota anual), solo una, o la otra. Se configuran **desde la pantalla de Clientes** (no hay flujo aparte de "Configurar honorario"), en la sección "Honorarios" del formulario de alta/edición.
+- **`js/honorarios.js`** ahora tiene una barra de búsqueda (por nombre o RUC) sobre la tabla principal, que muestra Cliente / Cuota Mensual / Cuota Anual / Estado / botón "Ficha". El estado "Al día"/"Debe" suma el saldo de cada cuota por separado (`calcularSaldoPorTipo`): cada una acumula deuda desde `honorarios.created_at` según su propia periodicidad, y se resta lo pagado de ese mismo tipo (`pagos_honorarios.tipo_honorario`).
+- **Registrar pago** ahora pide a qué cuota corresponde (mensual/anual), la **forma de pago** (efectivo/transferencia/cheque) y el **número de recibo**, además de monto/fecha/período (se sugieren automáticamente al elegir cliente y tipo).
+- **Ficha de pago descargable en PDF**: botón "Ficha" por cliente arma el HTML de la ficha (tabla mes a mes para la cuota mensual con Balance Anual, y/o tabla de la cuota anual) en un `<div id="ficha-pago-imprimir">` oculto, y llama a `window.print()` — no hay IPC ni ventana nueva de Electron; el `@media print` de `css/style.css` oculta todo lo demás y el usuario elige "Guardar como PDF" en el diálogo nativo de impresión.
+- **Membrete de la ficha** (nombre del estudio, dirección, teléfono, nota de vencimiento): tiene un valor **general** configurable en Configuración → "Membrete General" (tabla `configuracion_estudio`, fila única), pero cada cliente puede **sobreescribirlo individualmente** (`clientes.membrete_nombre/direccion/telefono`, opcionales) para el caso de un cliente que factura con otro logo/estudio. La precedencia es: dato propio del cliente si está cargado, si no el general.
+
 ## Historial: filtro por Obligación + grilla mensual con fecha exacta
 
 Antes era una lista cronológica simple de solo lo YA presentado. Ahora (`js/historial.js`) tiene el mismo filtro por Obligación que Presentaciones (arranca en IVA) y agrupa por vencimiento igual que el Excel, pero muestra TODOS los períodos, se hayan presentado o no:
@@ -120,7 +137,7 @@ La app pide email/contraseña al arrancar (`js/auth.js`, sección `#vista-login`
 
 ## Honorarios: cómo se calcula "Al día" / "Debe"
 
-Acumula TODA la deuda desde que se configuró el honorario de ese cliente (`honorarios.created_at`): cuenta cuántos períodos (meses o años, según periodicidad) pasaron hasta el período vigente inclusive, multiplica por el monto pactado, y le resta la suma de TODOS los pagos históricos del cliente (no solo los del período vigente). Si un cliente debe 3 meses atrasados y solo pagó el mes actual, ahora sí muestra "Debe" con el saldo pendiente.
+Acumula TODA la deuda desde que se configuró el honorario de ese cliente (`honorarios.created_at`), **por separado para la cuota mensual y la anual** (un cliente puede tener las dos): para cada cuota configurada, cuenta cuántos períodos (meses o años) pasaron hasta el período vigente inclusive, multiplica por el monto pactado de esa cuota, y le resta la suma de los pagos históricos de ese mismo `tipo_honorario` (no solo los del período vigente). El estado general es "Debe" si cualquiera de las dos cuotas tiene saldo pendiente; el badge muestra la suma de ambos saldos. Si un cliente debe 3 meses atrasados de la cuota mensual y solo pagó el mes actual, sigue mostrando "Debe" con el saldo pendiente.
 
 ## Pendientes / próximos pasos
 
