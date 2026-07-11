@@ -32,6 +32,9 @@
   --color-error-fondo: #fee2e2;
   --color-error-texto: #991b1b;
 
+  --color-neutro-fondo: #f3f4f6;
+  --color-neutro-texto: #6b7280;
+
   --color-vencido: #b91c1c;
 }
 
@@ -59,6 +62,9 @@
 
   --color-error-fondo: #4c0519;
   --color-error-texto: #fca5a5;
+
+  --color-neutro-fondo: #1e293b;
+  --color-neutro-texto: #94a3b8;
 
   --color-vencido: #f87171;
 }
@@ -200,6 +206,59 @@ input[type='date'] {
   font-size: 13px;
   background-color: var(--color-chico-fondo);
   color: var(--color-chico-texto);
+}
+
+.boton-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--color-marca);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.grupo-vencimiento {
+  margin-bottom: 24px;
+}
+
+.grupo-vencimiento-titulo {
+  margin: 0 0 4px;
+  padding: 8px 12px;
+  background-color: var(--color-chico-fondo);
+  color: var(--color-chico-texto);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.celda-historial {
+  text-align: center;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.celda-historial-presentado {
+  background-color: var(--color-exito-fondo);
+  color: var(--color-exito-texto);
+}
+
+.celda-historial-vencido {
+  background-color: var(--color-error-fondo);
+  color: var(--color-error-texto);
+  font-weight: 600;
+}
+
+.celda-historial-pendiente {
+  background-color: var(--color-neutro-fondo);
+  color: var(--color-neutro-texto);
+}
+
+.tabla-historial-mensual th,
+.tabla-historial-mensual td {
+  padding: 6px 4px;
+  font-size: 12px;
 }
 
 .fila-form {

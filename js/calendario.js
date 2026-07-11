@@ -109,14 +109,40 @@ async function cargarCalendario() {
   try {
     await asegurarVencimientosDelPeriodoVigente();
 
-    const { data, error } = await supabaseCalendario
-      .from('calendario_vencimientos')
-      .select('fecha_vencimiento, periodo, clientes(razon_social), obligaciones(periodicidad)')
-      .order('fecha_vencimiento', { ascending: true });
+    const [
+      { data: vencimientos, error: errorVencimientos },
+      { data: presentados, error: errorPresentados },
+    ] = await Promise.all([
+      supabaseCalendario
+        .from('calendario_vencimientos')
+        .select('cliente_id, obligacion_id, periodo, fecha_vencimiento, clientes(razon_social, cierre_fiscal_mes), obligaciones(periodicidad)')
+        .order('fecha_vencimiento', { ascending: true }),
+      supabaseCalendario
+        .from('presentaciones')
+        .select('cliente_id, obligacion_id, periodo')
+        .eq('estado', 'presentado'),
+    ]);
 
-    if (error) throw error;
+    if (errorVencimientos) throw errorVencimientos;
+    if (errorPresentados) throw errorPresentados;
 
-    dibujarTablaCalendario(data || []);
+    // El Calendario se "limpia" solo cada mes: únicamente muestra el
+    // período VIGENTE de cada obligación (igual que Presentaciones), no
+    // los meses/años anteriores. Si algo del período vigente todavía no
+    // se presentó, se sigue viendo acá; lo de períodos ya pasados (se
+    // presentó o no) queda solo en Historial.
+    const presentadosSet = new Set(
+      (presentados || []).map((p) => `${p.cliente_id}-${p.obligacion_id}-${p.periodo}`)
+    );
+    const pendientes = (vencimientos || []).filter((v) => {
+      if (presentadosSet.has(`${v.cliente_id}-${v.obligacion_id}-${v.periodo}`)) return false;
+
+      const cierreFiscalMes = v.clientes?.cierre_fiscal_mes ?? 12;
+      const periodoVigenteISO = formatearFechaISO(obtenerPeriodoVigente(v.obligaciones?.periodicidad, cierreFiscalMes));
+      return v.periodo === periodoVigenteISO;
+    });
+
+    dibujarTablaCalendario(pendientes);
   } catch (error) {
     console.error('Error al cargar el calendario:', error);
     if (elCalendarioMensaje) {

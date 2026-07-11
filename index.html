@@ -47,9 +47,9 @@
     <!-- Barra de navegación entre pantallas. data-vista indica qué sección
          de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
     <nav class="nav-principal">
-      <button class="nav-boton activo" data-vista="vista-clientes">Clientes</button>
+      <button class="nav-boton activo" data-vista="vista-presentaciones">Presentaciones</button>
+      <button class="nav-boton" data-vista="vista-clientes">Clientes</button>
       <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
-      <button class="nav-boton" data-vista="vista-presentaciones">Presentaciones</button>
       <button class="nav-boton" data-vista="vista-historial">Historial</button>
       <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
       <button class="nav-boton" data-vista="vista-configuracion">Configuración</button>
@@ -63,22 +63,13 @@
     <!-- ============================== -->
     <!-- VISTA: Clientes                -->
     <!-- ============================== -->
-    <section id="vista-clientes" class="vista">
+    <section id="vista-clientes" class="vista oculto">
 
-      <!-- Barra de acciones: filtro por responsable + botón para dar de alta -->
-      <section class="barra-acciones">
-        <div class="filtro">
-          <label for="filtro-responsable">Ver clientes de:</label>
-          <select id="filtro-responsable">
-            <option value="todos">Todos</option>
-            <!-- Las opciones de responsables se agregan dinámicamente desde clientes.js -->
-          </select>
-        </div>
-        <button id="btn-nuevo-cliente" class="boton boton-primario">+ Nuevo Cliente</button>
-      </section>
-
-      <!-- Formulario de alta / edición. Empieza oculto hasta que se necesite. -->
-      <section id="form-cliente-contenedor" class="tarjeta oculto">
+      <!-- Esta pantalla es solo para cargar/editar clientes -- no tiene
+           listado. Para ver los clientes ya cargados (con su RUC, clave
+           de Marangatu, etc.) ver la pantalla de Presentaciones, que
+           además permite abrir un cliente acá para editarlo. -->
+      <section id="form-cliente-contenedor" class="tarjeta">
         <h2 id="form-titulo">Nuevo Cliente</h2>
         <form id="form-cliente">
           <!-- Campo oculto: guarda el id cuando estamos editando un cliente existente -->
@@ -130,31 +121,9 @@
 
           <div class="acciones-form">
             <button type="submit" class="boton boton-primario">Guardar</button>
-            <button type="button" id="btn-cancelar" class="boton boton-secundario">Cancelar</button>
+            <button type="button" id="btn-cancelar" class="boton boton-secundario">Limpiar</button>
           </div>
         </form>
-      </section>
-
-      <!-- Listado de clientes -->
-      <section class="tarjeta">
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>RUC</th>
-              <th>Razón Social</th>
-              <th>Term. RUC</th>
-              <th>Responsable</th>
-              <th>Clave Marangatu</th>
-              <th>Cierre Fiscal</th>
-              <th>Fecha Alta</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="tabla-clientes-body">
-            <!-- Las filas se agregan dinámicamente desde clientes.js -->
-          </tbody>
-        </table>
-        <p id="sin-clientes" class="sin-datos oculto">No hay clientes para mostrar todavía.</p>
       </section>
 
     </section>
@@ -167,8 +136,11 @@
         <h2>Calendario de Vencimientos</h2>
         <p class="texto-ayuda">
           Se genera y actualiza solo: no hace falta recrearlo cada mes ni
-          cada año. La obligación IDU no aparece acá porque se carga a
-          mano solo cuando corresponde (distribución de dividendos).
+          cada año. Se limpia solo cada mes: solo muestra el período
+          VIGENTE y solo lo que todavía NO se presentó (una vez presentado,
+          o al pasar el período, desaparece de acá y queda en Historial).
+          La obligación IDU no aparece acá porque se carga a mano solo
+          cuando corresponde (distribución de dividendos).
         </p>
         <div id="calendario-mensaje" class="mensaje mensaje-error oculto"></div>
         <table class="tabla-clientes">
@@ -192,31 +164,27 @@
     <!-- ============================== -->
     <!-- VISTA: Presentaciones          -->
     <!-- ============================== -->
-    <section id="vista-presentaciones" class="vista oculto">
+    <section id="vista-presentaciones" class="vista">
       <section class="tarjeta">
         <h2>Presentaciones del Período Vigente</h2>
         <p class="texto-ayuda">
-          Tildá "Presentado" cuando ya se presentó esa obligación. Al
-          cambiar el mes o el año, esta lista se limpia sola para el
-          período nuevo — lo viejo queda guardado en Historial (Fase 5).
+          Agrupado por vencimiento (terminación de RUC), igual que la planilla
+          de control. Tildá "Presentado" cuando ya se presentó. Al cambiar de
+          mes o año, la lista se actualiza sola para el período nuevo — lo
+          viejo queda guardado en Historial.
         </p>
+        <div class="fila-form">
+          <label for="presentaciones-filtro-obligacion">Obligación</label>
+          <select id="presentaciones-filtro-obligacion">
+            <!-- Las opciones se arman dinámicamente desde js/presentaciones.js, una por obligación del catálogo -->
+          </select>
+        </div>
         <div id="presentaciones-mensaje" class="mensaje mensaje-error oculto"></div>
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Obligación</th>
-              <th>Período</th>
-              <th>Presentado</th>
-              <th>Fecha</th>
-            </tr>
-          </thead>
-          <tbody id="tabla-presentaciones-body">
-            <!-- Las filas se agregan dinámicamente desde js/presentaciones.js -->
-          </tbody>
-        </table>
+        <div id="presentaciones-grupos">
+          <!-- Los grupos "VENCIMIENTO N - FECHA D" se arman dinámicamente desde js/presentaciones.js -->
+        </div>
         <p id="sin-presentaciones" class="sin-datos oculto">
-          No hay presentaciones todavía (cargá al menos un cliente con terminación de RUC).
+          No hay clientes con esta obligación asignada para el período vigente.
         </p>
       </section>
     </section>
@@ -228,23 +196,23 @@
       <section class="tarjeta">
         <h2>Historial de Presentaciones</h2>
         <p class="texto-ayuda">
-          Todo lo que se presentó alguna vez, del más reciente al más
-          antiguo. No se agrupa por mes: es un registro cronológico simple.
+          Agrupado por vencimiento, igual que Presentaciones. Para
+          obligaciones mensuales (IVA) se ve el año completo mes por mes,
+          con la fecha exacta de vencimiento de cada uno; verde si se
+          presentó, rojo si ya venció y no se presentó, gris si todavía no
+          llega la fecha. Para las anuales se ve el año actual y el anterior.
         </p>
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Obligación</th>
-              <th>Período</th>
-              <th>Presentado el</th>
-            </tr>
-          </thead>
-          <tbody id="tabla-historial-body">
-            <!-- Las filas se agregan dinámicamente desde js/historial.js -->
-          </tbody>
-        </table>
-        <p id="sin-historial" class="sin-datos oculto">Todavía no se presentó nada.</p>
+        <div class="fila-form">
+          <label for="historial-filtro-obligacion">Obligación</label>
+          <select id="historial-filtro-obligacion">
+            <!-- Las opciones se arman dinámicamente desde js/historial.js, una por obligación del catálogo -->
+          </select>
+        </div>
+        <div id="historial-mensaje" class="mensaje mensaje-error oculto"></div>
+        <div id="historial-grupos">
+          <!-- Los grupos "VENCIMIENTO N - FECHA D" se arman dinámicamente desde js/historial.js -->
+        </div>
+        <p id="sin-historial" class="sin-datos oculto">No hay clientes con esta obligación asignada.</p>
       </section>
     </section>
 

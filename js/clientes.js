@@ -1,10 +1,10 @@
 // js/clientes.js
 // -----------------------------------------------------------------------
-// Toda la lógica de la pantalla de Clientes vive en este archivo:
-//   - Traer los clientes desde Supabase y mostrarlos en la tabla
-//   - Mostrar/ocultar el formulario de alta y edición
-//   - Guardar un cliente nuevo o los cambios de uno existente
-//   - Filtrar el listado por responsable
+// Pantalla Clientes: SOLO para cargar/editar un cliente (alta o edición).
+// No tiene listado propio -- para ver los clientes ya cargados (con su
+// RUC, clave de Marangatu, etc.) hay que ir a la pantalla de
+// Presentaciones (js/presentaciones.js), que además puede abrir un
+// cliente acá para editarlo (ver window.editarClienteDesdeOtraVista).
 // -----------------------------------------------------------------------
 
 // Todo el archivo va adentro de esta función para que sus variables no
@@ -18,17 +18,10 @@
 const supabase = require('./js/supabaseClient.js');
 
 // --- Referencias a elementos del HTML -----------------------------------
-// Buscamos los elementos del HTML una sola vez y los guardamos en
-// variables, para no tener que buscarlos de nuevo cada vez que los usamos.
 const elMensaje = document.getElementById('mensaje');
-const elFiltroResponsable = document.getElementById('filtro-responsable');
-const elBtnNuevoCliente = document.getElementById('btn-nuevo-cliente');
-const elFormContenedor = document.getElementById('form-cliente-contenedor');
 const elFormTitulo = document.getElementById('form-titulo');
 const elForm = document.getElementById('form-cliente');
 const elBtnCancelar = document.getElementById('btn-cancelar');
-const elTablaBody = document.getElementById('tabla-clientes-body');
-const elSinClientes = document.getElementById('sin-clientes');
 
 const elClienteId = document.getElementById('cliente-id');
 const elClienteRuc = document.getElementById('cliente-ruc');
@@ -39,17 +32,16 @@ const elClienteClaveMarangatu = document.getElementById('cliente-clave-marangatu
 const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-mes');
 const elClienteObligacionesCheckboxes = document.getElementById('cliente-obligaciones-checkboxes');
 
-const NOMBRES_MES_CLIENTES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-
-// Guardamos en memoria la última lista de clientes que llegó de Supabase,
-// para poder armar el filtro de responsables y abrir la edición sin tener
-// que volver a pedirle los datos al servidor.
-let clientesCache = [];
-
-// Catálogo de obligaciones (para armar los checkboxes) y, mientras se
-// edita un cliente existente, qué obligaciones ya tiene asignadas.
+// Catálogo de obligaciones, para armar los checkboxes.
 let obligacionesCache = [];
 let obligacionesDelClienteEnEdicion = new Set();
+
+// Se pone en true justo antes de forzar la vista de Clientes desde otra
+// pantalla (ver editarClienteDesdeOtraVista) para que la próxima llamada a
+// cargarClientes() -que dispara navegacion.js al cambiar de pestaña- no
+// resetee el formulario que estamos a punto de completar con los datos
+// del cliente a editar.
+let ignorarProximaCarga = false;
 
 // --- Mensajes para el usuario --------------------------------------------
 
@@ -58,22 +50,22 @@ function mostrarMensaje(texto, tipo = 'exito', permanente = false) {
   elMensaje.className = `mensaje mensaje-${tipo}`;
   elMensaje.classList.remove('oculto');
 
-  // Los mensajes de éxito/error puntuales se ocultan solos. Los mensajes
-  // "permanentes" (por ejemplo, avisar que falta configurar Supabase) se
-  // quedan visibles hasta que el usuario resuelva el problema.
   if (!permanente) {
     setTimeout(() => elMensaje.classList.add('oculto'), 4000);
   }
 }
 
-// --- Cargar y mostrar clientes --------------------------------------------
+// Evita que texto ingresado por el usuario "rompa" el HTML (por ejemplo,
+// si alguien escribe algo como <script> en el nombre de una obligación).
+function escaparHtml(texto) {
+  const div = document.createElement('div');
+  div.textContent = texto ?? '';
+  return div.innerHTML;
+}
 
-// Pide a Supabase la lista de clientes (opcionalmente filtrada por
-// responsable) y la dibuja en la tabla.
+// --- Carga inicial: solo el catálogo de obligaciones (para los checkboxes) ---
+
 async function cargarClientes() {
-  // Si todavía no se completó el archivo .env con las credenciales reales
-  // de Supabase, "supabase" es null (ver supabaseClient.js). En ese caso no
-  // hay nada para consultar: mostramos el aviso y no seguimos.
   if (!supabase) {
     mostrarMensaje(
       'Todavía no configuraste la conexión a Supabase. Copiá el archivo ".env.example" como ".env", completá tus credenciales y volvé a abrir la app.',
@@ -83,107 +75,24 @@ async function cargarClientes() {
     return;
   }
 
-  try {
-    let consultaClientes = supabase.from('clientes').select('*').order('razon_social', { ascending: true });
-
-    const responsableSeleccionado = elFiltroResponsable.value;
-    if (responsableSeleccionado && responsableSeleccionado !== 'todos') {
-      consultaClientes = consultaClientes.eq('responsable', responsableSeleccionado);
-    }
-
-    const [
-      { data: clientes, error: errorClientes },
-      { data: obligaciones, error: errorObligaciones },
-    ] = await Promise.all([
-      consultaClientes,
-      supabase.from('obligaciones').select('*').order('id'),
-    ]);
-
-    if (errorClientes) throw errorClientes;
-    if (errorObligaciones) throw errorObligaciones;
-
-    clientesCache = clientes || [];
-    obligacionesCache = obligaciones || [];
-    dibujarTabla(clientesCache);
-    actualizarOpcionesDeFiltro(clientesCache);
-  } catch (error) {
-    console.error('Error al cargar clientes:', error);
-    mostrarMensaje(
-      'No se pudieron cargar los clientes. Revisá tu conexión a internet y las credenciales del archivo .env.',
-      'error'
-    );
-  }
-}
-
-// Dibuja las filas de la tabla a partir de un arreglo de clientes.
-function dibujarTabla(clientes) {
-  elTablaBody.innerHTML = '';
-
-  if (clientes.length === 0) {
-    elSinClientes.classList.remove('oculto');
+  // Si venimos de editarClienteDesdeOtraVista(), esa función ya dejó todo
+  // listo (catálogo cargado, formulario en modo edición): no lo pisamos.
+  if (ignorarProximaCarga) {
+    ignorarProximaCarga = false;
     return;
   }
-  elSinClientes.classList.add('oculto');
 
-  for (const cliente of clientes) {
-    const fila = document.createElement('tr');
+  try {
+    const { data, error } = await supabase.from('obligaciones').select('*').order('id');
+    if (error) throw error;
 
-    fila.innerHTML = `
-      <td>${escaparHtml(cliente.ruc)}</td>
-      <td>${escaparHtml(cliente.razon_social)}</td>
-      <td>${cliente.terminacion_ruc ?? ''}</td>
-      <td>${escaparHtml(cliente.responsable)}</td>
-      <td>${escaparHtml(cliente.clave_marangatu)}</td>
-      <td>${NOMBRES_MES_CLIENTES[(cliente.cierre_fiscal_mes ?? 12) - 1]}</td>
-      <td>${formatearFecha(cliente.fecha_alta)}</td>
-      <td><button class="boton boton-chico" data-id="${cliente.id}">Editar</button></td>
-    `;
-
-    elTablaBody.appendChild(fila);
+    obligacionesCache = data || [];
+    abrirFormularioNuevo();
+  } catch (error) {
+    console.error('Error al cargar el catálogo de obligaciones:', error);
+    mostrarMensaje('No se pudo cargar el catálogo de obligaciones.', 'error');
   }
 }
-
-// Convierte una fecha "2026-07-11" en un formato más fácil de leer: 11/07/2026
-function formatearFecha(fechaISO) {
-  if (!fechaISO) return '';
-  const [anio, mes, dia] = fechaISO.split('-');
-  return `${dia}/${mes}/${anio}`;
-}
-
-// Evita que texto ingresado por el usuario "rompa" el HTML de la tabla
-// (por ejemplo, si alguien escribe algo como <script> en la Razón Social).
-function escaparHtml(texto) {
-  const div = document.createElement('div');
-  div.textContent = texto ?? '';
-  return div.innerHTML;
-}
-
-// --- Filtro por responsable -----------------------------------------------
-
-// Arma las opciones del <select> de filtro a partir de los responsables
-// que ya existen entre los clientes cargados (sin repetir nombres).
-function actualizarOpcionesDeFiltro(clientes) {
-  const seleccionActual = elFiltroResponsable.value;
-  const responsablesUnicos = [...new Set(clientes.map((c) => c.responsable))].sort();
-
-  elFiltroResponsable.innerHTML = '<option value="todos">Todos</option>';
-
-  for (const responsable of responsablesUnicos) {
-    const opcion = document.createElement('option');
-    opcion.value = responsable;
-    opcion.textContent = responsable;
-    elFiltroResponsable.appendChild(opcion);
-  }
-
-  // Si la opción que estaba elegida todavía existe en la nueva lista,
-  // la mantenemos seleccionada (para no "resetear" el filtro sin querer).
-  const sigueExistiendo = [...elFiltroResponsable.options].some((o) => o.value === seleccionActual);
-  if (sigueExistiendo) {
-    elFiltroResponsable.value = seleccionActual;
-  }
-}
-
-elFiltroResponsable.addEventListener('change', cargarClientes);
 
 // --- Checkboxes de obligaciones por cliente --------------------------------
 
@@ -205,18 +114,22 @@ function dibujarCheckboxesObligaciones(obligacionesSeleccionadas) {
   }
 }
 
-// --- Mostrar / ocultar formulario ------------------------------------------
+// --- Mostrar el formulario en modo alta / edición --------------------------
 
 function abrirFormularioNuevo() {
   elForm.reset();
   elClienteId.value = '';
   elFormTitulo.textContent = 'Nuevo Cliente';
-  dibujarCheckboxesObligaciones(new Set());
-  elFormContenedor.classList.remove('oculto');
+  obligacionesDelClienteEnEdicion = new Set();
+  dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
   elClienteRuc.focus();
 }
 
-async function abrirFormularioEdicion(cliente) {
+// Llena el formulario con los datos de un cliente ya cargado. Las
+// obligaciones ya asignadas se leen de "obligacionesDelClienteEnEdicion",
+// que tiene que estar seteada ANTES de llamar a esta función (ver
+// window.editarClienteDesdeOtraVista, que la carga desde Supabase).
+function abrirFormularioEdicion(cliente) {
   elClienteId.value = cliente.id;
   elClienteRuc.value = cliente.ruc;
   elClienteRazonSocial.value = cliente.razon_social;
@@ -227,36 +140,10 @@ async function abrirFormularioEdicion(cliente) {
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
   dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
-  elFormContenedor.classList.remove('oculto');
   elClienteRuc.focus();
-
-  try {
-    const { data, error } = await supabase
-      .from('cliente_obligaciones')
-      .select('obligacion_id')
-      .eq('cliente_id', cliente.id);
-
-    if (error) throw error;
-
-    // Si mientras se cargaba esto el usuario ya cerró el formulario o
-    // abrió otro cliente, no pisamos lo que esté mostrando ahora.
-    if (elClienteId.value !== String(cliente.id)) return;
-
-    obligacionesDelClienteEnEdicion = new Set((data || []).map((fila) => fila.obligacion_id));
-    dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
-  } catch (error) {
-    console.error('Error al cargar las obligaciones del cliente:', error);
-  }
 }
 
-function cerrarFormulario() {
-  elForm.reset();
-  elFormContenedor.classList.add('oculto');
-  obligacionesDelClienteEnEdicion = new Set();
-}
-
-elBtnNuevoCliente.addEventListener('click', abrirFormularioNuevo);
-elBtnCancelar.addEventListener('click', cerrarFormulario);
+elBtnCancelar.addEventListener('click', abrirFormularioNuevo);
 
 // Cuando el usuario escribe el RUC, sugerimos automáticamente la
 // terminación (el último dígito antes del guion), pero el usuario siempre
@@ -326,8 +213,7 @@ elForm.addEventListener('submit', async (evento) => {
     }
 
     mostrarMensaje(idExistente ? 'Cliente actualizado correctamente.' : 'Cliente creado correctamente.');
-    cerrarFormulario();
-    await cargarClientes();
+    abrirFormularioNuevo();
   } catch (error) {
     console.error('Error al guardar cliente:', error);
 
@@ -340,24 +226,49 @@ elForm.addEventListener('submit', async (evento) => {
   }
 });
 
-// --- Click en "Editar" dentro de la tabla ------------------------------------
+// --- Editar un cliente desde otra pantalla (Presentaciones) -----------------
 
-// En vez de agregar un listener a cada botón "Editar" (que se crean y
-// destruyen todo el tiempo), escuchamos los clicks en toda la tabla y
-// revisamos si el click vino de un botón con data-id.
-elTablaBody.addEventListener('click', async (evento) => {
-  const boton = evento.target.closest('button[data-id]');
-  if (!boton) return;
+// Cambia a la pestaña Clientes y abre el formulario con los datos de un
+// cliente existente, listo para editar. Pensada para ser llamada desde
+// js/presentaciones.js cuando el contador quiere corregir un cliente que
+// ve en esa lista.
+window.editarClienteDesdeOtraVista = async function editarClienteDesdeOtraVista(clienteId) {
+  if (!supabase) return;
 
-  const cliente = clientesCache.find((c) => String(c.id) === boton.dataset.id);
-  if (cliente) await abrirFormularioEdicion(cliente);
-});
+  try {
+    const [
+      { data: obligacionesCatalogo, error: errorObligacionesCatalogo },
+      { data: cliente, error: errorCliente },
+      { data: obligacionesDelCliente, error: errorObligacionesDelCliente },
+    ] = await Promise.all([
+      obligacionesCache.length > 0
+        ? Promise.resolve({ data: obligacionesCache, error: null })
+        : supabase.from('obligaciones').select('*').order('id'),
+      supabase.from('clientes').select('*').eq('id', clienteId).single(),
+      supabase.from('cliente_obligaciones').select('obligacion_id').eq('cliente_id', clienteId),
+    ]);
+
+    if (errorObligacionesCatalogo) throw errorObligacionesCatalogo;
+    if (errorCliente) throw errorCliente;
+    if (errorObligacionesDelCliente) throw errorObligacionesDelCliente;
+
+    obligacionesCache = obligacionesCatalogo || [];
+    obligacionesDelClienteEnEdicion = new Set((obligacionesDelCliente || []).map((fila) => fila.obligacion_id));
+
+    ignorarProximaCarga = true;
+    window.mostrarVista('vista-clientes');
+    abrirFormularioEdicion(cliente);
+  } catch (error) {
+    console.error('Error al abrir el cliente para editar:', error);
+    mostrarMensaje('No se pudo abrir el cliente para editar.', 'error');
+  }
+};
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.
 window.cargarClientes = cargarClientes;
 
-// --- Arranque: apenas se abre la pantalla, cargamos los clientes -------------
+// --- Arranque: apenas se abre la pantalla, cargamos el catálogo -------------
 cargarClientes();
 
 })();
