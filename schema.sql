@@ -20,19 +20,17 @@ create table if not exists public.clientes (
     -- para calcular el vencimiento mensual de IVA según el calendario del SET.
     terminacion_ruc     smallint,
 
-    -- Solo dos valores permitidos por ahora (ver nota de endurecimiento abajo
-    -- si más adelante se agregan más regímenes, p.ej. "IVA AGROPECUARIO").
-    tipo_contribuyente  text not null,
-
     -- Encargado del cliente dentro del estudio. Texto libre: todavía no hay
     -- tabla de usuarios/autenticación, así que no es una FK.
     responsable         text not null,
 
-    -- Mes (1-12) en que cierra el ejercicio fiscal de este cliente. La
-    -- mayoría cierra en diciembre (12, valor por defecto), pero algunos
-    -- clientes pueden tener un cierre distinto. calendario-logica.js usa
-    -- este valor para calcular en qué mes vence IRE SIMPLE/GENERAL y
-    -- ESTADO FINANCIERO (en vez de asumir siempre 31/12).
+    -- Mes de cierre del ejercicio fiscal de este cliente. Según el Decreto
+    -- 3182/2019 (DNIT), no cualquier mes es válido: 12 = diciembre (regla
+    -- general), 4 = abril (ingenios azucareros y cooperativas que
+    -- industrializan productos agropecuarios), 6 = junio (aseguradoras/
+    -- reaseguradoras e industrias de cerveza/gaseosas). calendario-logica.js
+    -- usa este valor para calcular en qué mes vencen IRE SIMPLE/GENERAL,
+    -- ESTADO FINANCIERO, IRP-RSP e IRP-RGC.
     cierre_fiscal_mes   smallint not null default 12,
 
     -- Clave de acceso del cliente al Sistema Marangatu (SET, Paraguay).
@@ -54,11 +52,8 @@ create table if not exists public.clientes (
     constraint clientes_terminacion_ruc_rango
         check (terminacion_ruc is null or terminacion_ruc between 0 and 9),
 
-    constraint clientes_tipo_contribuyente_valido
-        check (tipo_contribuyente in ('IRE SIMPLE', 'IRE GENERAL')),
-
     constraint clientes_cierre_fiscal_mes_rango
-        check (cierre_fiscal_mes between 1 and 12)
+        check (cierre_fiscal_mes in (4, 6, 12))
 );
 
 -- Migración para bases ya existentes creadas antes de este campo (la
@@ -73,16 +68,24 @@ alter table public.clientes
 alter table public.clientes
     add column if not exists clave_marangatu text;
 
-do $$
-begin
-    if not exists (
-        select 1 from pg_constraint where conname = 'clientes_cierre_fiscal_mes_rango'
-    ) then
-        alter table public.clientes
-            add constraint clientes_cierre_fiscal_mes_rango
-            check (cierre_fiscal_mes between 1 and 12);
-    end if;
-end $$;
+-- "Tipo de Contribuyente" quedó redundante desde que cada cliente elige a
+-- mano qué obligaciones le corresponden (tabla cliente_obligaciones, ver
+-- sección 6.1): antes se usaba solo para sugerir esas obligaciones. Se
+-- borra la columna (y de paso el índice y el check constraint que
+-- dependían de ella, Postgres los elimina solo al borrar la columna).
+alter table public.clientes
+    drop column if exists tipo_contribuyente;
+
+-- El rango válido de cierre_fiscal_mes cambió de "1 a 12" a "solo 4, 6 o
+-- 12" (Decreto 3182/2019). Se borra y se vuelve a crear el constraint
+-- porque un `add constraint` con el mismo nombre no actualiza la
+-- condición si ya existía con la regla vieja.
+alter table public.clientes
+    drop constraint if exists clientes_cierre_fiscal_mes_rango;
+
+alter table public.clientes
+    add constraint clientes_cierre_fiscal_mes_rango
+    check (cierre_fiscal_mes in (4, 6, 12));
 
 comment on table  public.clientes is
     'Clientes del estudio contable (Fase 1). Obligaciones, honorarios, etc. se agregan en fases posteriores.';
@@ -91,7 +94,7 @@ comment on column public.clientes.terminacion_ruc is
 comment on column public.clientes.responsable is
     'Encargado del cliente dentro del estudio (texto libre, sin FK a usuarios todavía).';
 comment on column public.clientes.cierre_fiscal_mes is
-    'Mes (1-12) de cierre del ejercicio fiscal; 12 = diciembre (default). Usado por calendario-logica.js para IRE SIMPLE/GENERAL y ESTADO FINANCIERO.';
+    'Mes de cierre del ejercicio fiscal: 12 = diciembre (regla general), 4 = abril, 6 = junio (excepciones del Decreto 3182/2019). Usado por calendario-logica.js para IRE SIMPLE/GENERAL, ESTADO FINANCIERO, IRP-RSP e IRP-RGC.';
 comment on column public.clientes.clave_marangatu is
     'Clave de acceso del cliente al Sistema Marangatu (SET). Texto plano, visible en la tabla de Clientes.';
 
@@ -103,10 +106,6 @@ comment on column public.clientes.clave_marangatu is
 -- Filtro más frecuente: "mis clientes" por responsable.
 create index if not exists idx_clientes_responsable
     on public.clientes (responsable);
-
--- Filtro secundario común: listar por régimen tributario.
-create index if not exists idx_clientes_tipo_contribuyente
-    on public.clientes (tipo_contribuyente);
 
 -- ---------------------------------------------------------------------
 -- 3. TRIGGER updated_at
@@ -216,6 +215,8 @@ insert into public.obligaciones (codigo, nombre, periodicidad) values
     ('IRE_SIMPLE',        'IRE SIMPLE',          'anual'),
     ('IRE_GENERAL',       'IRE GENERAL',         'anual'),
     ('ESTADO_FINANCIERO', 'ESTADO FINANCIERO',   'anual'),
+    ('IRP_RSP',           'IRP-RSP',             'anual'),
+    ('IRP_RGC',           'IRP-RGC',             'anual'),
     ('IDU',               'IDU',                'manual')
 on conflict (codigo) do update
     set nombre       = excluded.nombre,
@@ -347,8 +348,8 @@ create index if not exists idx_calendario_obligacion_id
 --     Confirmadas con la SET; revisar si cambian por nueva normativa.
 -- ---------------------------------------------------------------------
 -- 1) Día base del mes según terminación de RUC del cliente (aplica a IVA,
---    IRE SIMPLE, IRE GENERAL y ESTADO FINANCIERO — todas usan esta misma
---    tabla de días, solo cambia el MES, ver punto 2):
+--    IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP e IRP-RGC — todas
+--    usan esta misma tabla de días, solo cambia el MES, ver punto 2):
 --
 --        terminacion_ruc  ->  día del mes
 --        0                ->  7
@@ -362,12 +363,21 @@ create index if not exists idx_calendario_obligacion_id
 --        8                ->  23
 --        9                ->  25
 --
--- 2) Mes de vencimiento según obligación:
---      - IVA               (mensual): mismo mes que el período declarado.
---      - IRE SIMPLE        (anual):   3er mes posterior al cierre fiscal.
---                                     Cierre asumido 31/12 => vence en MARZO.
+-- 2) Meses posteriores al cierre fiscal según obligación (el cierre fiscal
+--    es por cliente, ver clientes.cierre_fiscal_mes — con cierre 31/12,
+--    que es la regla general, esto da los meses de siempre):
+--      - IVA               (mensual): mismo mes que el período declarado
+--                                     (no depende del cierre fiscal).
+--      - IRE SIMPLE        (anual):   3er mes posterior al cierre.
+--                                     Cierre 31/12 => vence en MARZO.
+--      - IRP-RSP           (anual):   3er mes posterior al cierre, igual
+--                                     que IRE SIMPLE (Formulario 515,
+--                                     Sistema Marangatu).
+--      - IRP-RGC           (anual):   3er mes posterior al cierre, igual
+--                                     que IRE SIMPLE (Formulario 516,
+--                                     Sistema Marangatu).
 --      - IRE GENERAL       (anual):   4to mes posterior al cierre.
---                                     Cierre asumido 31/12 => vence en ABRIL.
+--                                     Cierre 31/12 => vence en ABRIL.
 --      - ESTADO FINANCIERO (anual):   mismo vencimiento que IRE GENERAL
 --                                     (se presentan juntos, mismo mes/día).
 --      - IDU               (manual):  NO se genera automáticamente en
@@ -381,9 +391,11 @@ create index if not exists idx_calendario_obligacion_id
 --    sábado, domingo o figura en `feriados`, se corre al siguiente día
 --    hábil (siguiente día que no sea sábado/domingo/feriado).
 --
--- 4) Si el cierre fiscal de un cliente deja de ser 31/12, los meses 3 y 4
---    del punto 2 deben recalcularse relativos a SU cierre, no al calendario
---    natural (hoy se asume 31/12 para todos los clientes).
+-- 4) Cierre fiscal válido (Decreto 3182/2019, DNIT): no cualquier mes,
+--    solo diciembre (regla general), abril (ingenios azucareros y
+--    cooperativas que industrializan productos agropecuarios) o junio
+--    (aseguradoras/reaseguradoras e industrias de cerveza/gaseosas). Ver
+--    constraint clientes_cierre_fiscal_mes_rango.
 -- ---------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------

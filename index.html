@@ -101,15 +101,6 @@
           </div>
 
           <div class="fila-form">
-            <label for="cliente-tipo-contribuyente">Tipo de Contribuyente</label>
-            <select id="cliente-tipo-contribuyente" required>
-              <option value="">Seleccioná una opción</option>
-              <option value="IRE SIMPLE">IRE SIMPLE</option>
-              <option value="IRE GENERAL">IRE GENERAL</option>
-            </select>
-          </div>
-
-          <div class="fila-form">
             <label for="cliente-responsable">Responsable</label>
             <input type="text" id="cliente-responsable" placeholder="Ej: Christian" required />
           </div>
@@ -124,26 +115,17 @@
             <div id="cliente-obligaciones-checkboxes" class="grupo-checkboxes">
               <!-- Los checkboxes se arman dinámicamente desde clientes.js, uno por obligación del catálogo -->
             </div>
-            <small>Se marcan solas según el tipo de contribuyente, pero podés corregirlas (agregar IDU, sacar alguna, etc.).</small>
+            <small>Tildá las que le correspondan a este cliente.</small>
           </div>
 
           <div class="fila-form">
             <label for="cliente-cierre-fiscal-mes">Mes de Cierre Fiscal</label>
             <select id="cliente-cierre-fiscal-mes" required>
-              <option value="1">Enero</option>
-              <option value="2">Febrero</option>
-              <option value="3">Marzo</option>
-              <option value="4">Abril</option>
-              <option value="5">Mayo</option>
-              <option value="6">Junio</option>
-              <option value="7">Julio</option>
-              <option value="8">Agosto</option>
-              <option value="9">Septiembre</option>
-              <option value="10">Octubre</option>
-              <option value="11">Noviembre</option>
-              <option value="12" selected>Diciembre</option>
+              <option value="12" selected>Diciembre (regla general)</option>
+              <option value="4">Abril (ingenios azucareros y cooperativas agropecuarias)</option>
+              <option value="6">Junio (aseguradoras/reaseguradoras y cerveceras/gaseosas)</option>
             </select>
-            <small>La mayoría cierra en diciembre. Cambialo solo si este cliente tiene un ejercicio fiscal distinto.</small>
+            <small>Fechas válidas según el Decreto 3182/2019 (DNIT). La mayoría cierra en diciembre.</small>
           </div>
 
           <div class="acciones-form">
@@ -161,7 +143,6 @@
               <th>RUC</th>
               <th>Razón Social</th>
               <th>Term. RUC</th>
-              <th>Tipo Contribuyente</th>
               <th>Responsable</th>
               <th>Clave Marangatu</th>
               <th>Cierre Fiscal</th>

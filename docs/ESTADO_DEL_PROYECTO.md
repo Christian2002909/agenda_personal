@@ -16,8 +16,8 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 
 | Fase | Pantalla | Qué hace |
 |---|---|---|
-| 1 | Clientes | Alta, edición, listado, filtro por responsable. Cada cliente tiene además clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes, ver abajo) |
-| 2 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
+| 1 | Clientes | Alta, edición, listado, filtro por responsable. Cada cliente tiene además clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes, ver abajo). Ya no tiene "Tipo de Contribuyente" (se sacó de la app y de la base, quedó redundante) |
+| 2 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
 | 3 | Calendario | Genera y muestra los vencimientos calculados según terminación de RUC, **solo para las obligaciones que cada cliente tiene asignadas**. Se actualiza solo, nunca hay que recrearlo a mano |
 | 4 | Presentaciones | Checkbox por Cliente + Obligación asignada + Período vigente, con fecha automática al marcar |
 | 5 | Historial | Todo lo presentado alguna vez, orden cronológico, sin agrupar |
@@ -30,7 +30,7 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 2. **Node.js v22.12 o superior** (LTS más reciente recomendado). Electron necesita esta versión para poder descargarse a sí mismo la primera vez (`npm install`/`npm start` fallan con `ERR_REQUIRE_ESM` en Node más viejo, ej. v20).
 3. `npm install`
 4. Copiar `.env.example` como `.env` y completar con las credenciales reales de Supabase (Project Settings → API Keys en supabase.com → "Clave publicable" `sb_publishable_...` es la que va en `SUPABASE_ANON_KEY`). **El archivo `.env` nunca se sube a git.**
-5. Volver a correr `schema.sql` completo en el SQL Editor de Supabase (es idempotente: agrega lo nuevo — `cierre_fiscal_mes`, `clave_marangatu`, tabla `cliente_obligaciones`, tabla `perfiles`, RLS endurecida — sin duplicar lo que ya existía).
+5. Volver a correr `schema.sql` completo en el SQL Editor de Supabase (es idempotente: agrega lo nuevo — `cierre_fiscal_mes` restringido a 4/6/12, `clave_marangatu`, catálogo IRP-RSP/IRP-RGC, tabla `cliente_obligaciones`, tabla `perfiles`, RLS endurecida — y borra `tipo_contribuyente`, que quedó redundante).
 6. Crear al menos un usuario en Authentication → Users del dashboard de Supabase (la app ya no acepta acceso anónimo, ver "Login" abajo).
 7. `npm start`
 
@@ -69,19 +69,18 @@ Ver también `schema.sql`, sección "8.1 REGLAS DE NEGOCIO".
 
 - **Día de vencimiento según terminación de RUC** (Resolución General 01/2007 y 38/2020): 0→7, 1→9, 2→11, 3→13, 4→15, 5→17, 6→19, 7→21, 8→23, 9→25.
 - **IVA**: mensual, vence ese día del mismo mes.
-- **IRE SIMPLE**: anual, vence en marzo del año siguiente al cierre fiscal.
+- **IRE SIMPLE, IRP-RSP e IRP-RGC**: anuales, vencen en marzo del año siguiente al cierre fiscal (Formularios 141/515/516 en Sistema Marangatu — [fuente DNIT](https://www.dnit.gov.py/web/portal-institucional/w/en-marzo-vence-el-plazo-para-la-liquidacion-del-irp-correspondiente-al-ejercicio-fiscal-2022-en-tanto-que-los-registros-de-comprobantes-del-mismo-ano-pueden-ser-presentados-excepcionalmente-hasta-junio)).
 - **IRE GENERAL** y **ESTADO FINANCIERO**: anuales, vencen en abril del año siguiente (se presentan juntos).
 - **IDU**: NO se genera automático. Se carga a mano en Supabase cuando el contador confirma que un cliente distribuyó dividendos ese año.
 - Si la fecha cae sábado, domingo o feriado, se corre al siguiente día hábil.
-- **Cierre fiscal personalizado por cliente** (`clientes.cierre_fiscal_mes`, 1-12, default 12 = diciembre): `calendario-logica.js` calcula el vencimiento como "N meses después del mes de cierre" (N=3 para IRE SIMPLE, N=4 para IRE GENERAL/ESTADO FINANCIERO), y el "período vigente" como el ejercicio que cerró más recientemente según la fecha de hoy. Con cierre en diciembre esto da exactamente el comportamiento original (marzo/abril del año siguiente).
+- **Cierre fiscal personalizado por cliente** (`clientes.cierre_fiscal_mes`): `calendario-logica.js` calcula el vencimiento como "N meses después del mes de cierre", y el "período vigente" como el ejercicio que cerró más recientemente según la fecha de hoy. Con cierre en diciembre esto da exactamente el comportamiento original (marzo/abril del año siguiente). **Solo se aceptan 3 valores** (constraint `clientes_cierre_fiscal_mes_rango`), según el Decreto 3182/2019 (DNIT): 12 = diciembre (regla general), 4 = abril (ingenios azucareros y cooperativas que industrializan productos agropecuarios), 6 = junio (aseguradoras/reaseguradoras e industrias de cerveza/gaseosas).
 - **Feriados**: no vienen precargados. Paraguay tiene feriados fijos + hasta 3 adicionales por decreto que cambian cada año, así que hay que cargarlos a mano en la tabla `feriados` de Supabase a medida que se conocen (justo como lo pidió el usuario).
 
 ## Obligaciones por cliente (tabla cliente_obligaciones)
 
-Antes, el Calendario y Presentaciones asumían que TODOS los clientes tenían todas las obligaciones automáticas (IVA + IRE SIMPLE/GENERAL + ESTADO FINANCIERO), sin mirar si correspondía. Ahora cada cliente tiene una lista explícita de qué obligaciones le corresponden (tabla `cliente_obligaciones`, configurada con checkboxes en la pantalla de Clientes):
+Antes, el Calendario y Presentaciones asumían que TODOS los clientes tenían todas las obligaciones automáticas (IVA + IRE SIMPLE/GENERAL + ESTADO FINANCIERO), sin mirar si correspondía. Ahora cada cliente tiene una lista explícita de qué obligaciones le corresponden (tabla `cliente_obligaciones`, configurada con checkboxes en la pantalla de Clientes), sin ninguna sugerencia automática — el contador tilda a mano las que correspondan para cada cliente nuevo.
 
-- Al elegir el **tipo de contribuyente** en un cliente nuevo, se pre-marcan solas las obligaciones típicas de ese tipo (`OBLIGACIONES_SUGERIDAS_POR_TIPO` en `clientes.js`) — el contador puede tildar/destildar lo que haga falta (agregar IDU, sacar alguna, etc.) antes de guardar.
-- Editar el tipo de contribuyente de un cliente YA GUARDADO no pisa sus obligaciones configuradas a mano.
+- **"Tipo de Contribuyente" se eliminó de la app y de la base** (columna, constraint e índice borrados en `schema.sql`): quedó redundante en cuanto se pudo elegir la obligación directamente. Antes se usaba solo para sugerir qué tildar.
 - Al guardar, se reemplazan todas las filas de `cliente_obligaciones` de ese cliente por las que quedaron tildadas (se borra todo y se reinserta; son pocas filas, no vale la pena comparar diferencias).
 - Calendario y Presentaciones ahora recorren `cliente_obligaciones` (en vez de cliente × catálogo completo) para decidir qué vencimientos/presentaciones generar. IDU sigue sin generarse nunca automáticamente aunque esté tildado (periodicidad "manual").
 - La pantalla de catálogo de Obligaciones (antes Fase 2, de solo lectura) se sacó del menú: ya no aporta nada que no esté en el formulario de Clientes.

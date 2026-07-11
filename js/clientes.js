@@ -34,22 +34,12 @@ const elClienteId = document.getElementById('cliente-id');
 const elClienteRuc = document.getElementById('cliente-ruc');
 const elClienteRazonSocial = document.getElementById('cliente-razon-social');
 const elClienteTerminacionRuc = document.getElementById('cliente-terminacion-ruc');
-const elClienteTipoContribuyente = document.getElementById('cliente-tipo-contribuyente');
 const elClienteResponsable = document.getElementById('cliente-responsable');
 const elClienteClaveMarangatu = document.getElementById('cliente-clave-marangatu');
 const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-mes');
 const elClienteObligacionesCheckboxes = document.getElementById('cliente-obligaciones-checkboxes');
 
 const NOMBRES_MES_CLIENTES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-
-// Qué obligaciones del catálogo se marcan solas al elegir un tipo de
-// contribuyente (el contador siempre puede corregir el resultado a mano,
-// esto es solo para no partir de cero cada vez). IDU nunca se pre-marca:
-// se agrega a mano cuando corresponde (ver reglas de negocio en schema.sql).
-const OBLIGACIONES_SUGERIDAS_POR_TIPO = {
-  'IRE SIMPLE': ['IVA', 'IRE_SIMPLE'],
-  'IRE GENERAL': ['IVA', 'IRE_GENERAL', 'ESTADO_FINANCIERO'],
-};
 
 // Guardamos en memoria la última lista de clientes que llegó de Supabase,
 // para poder armar el filtro de responsables y abrir la edición sin tener
@@ -142,7 +132,6 @@ function dibujarTabla(clientes) {
       <td>${escaparHtml(cliente.ruc)}</td>
       <td>${escaparHtml(cliente.razon_social)}</td>
       <td>${cliente.terminacion_ruc ?? ''}</td>
-      <td>${escaparHtml(cliente.tipo_contribuyente)}</td>
       <td>${escaparHtml(cliente.responsable)}</td>
       <td>${escaparHtml(cliente.clave_marangatu)}</td>
       <td>${NOMBRES_MES_CLIENTES[(cliente.cierre_fiscal_mes ?? 12) - 1]}</td>
@@ -216,26 +205,6 @@ function dibujarCheckboxesObligaciones(obligacionesSeleccionadas) {
   }
 }
 
-// Sugiere qué obligaciones tildar según el tipo de contribuyente elegido
-// (ver OBLIGACIONES_SUGERIDAS_POR_TIPO). Es solo un punto de partida: el
-// contador puede tildar/destildar lo que haga falta antes de guardar.
-function obtenerObligacionesSugeridas(tipoContribuyente) {
-  const codigosSugeridos = OBLIGACIONES_SUGERIDAS_POR_TIPO[tipoContribuyente] || [];
-  const idsSugeridos = obligacionesCache
-    .filter((o) => codigosSugeridos.includes(o.codigo))
-    .map((o) => o.id);
-  return new Set(idsSugeridos);
-}
-
-// Solo autocompletamos las sugerencias mientras se está dando de ALTA un
-// cliente nuevo (sin id todavía). Si ya existe, cambiar el tipo de
-// contribuyente no debe pisar las obligaciones que el contador configuró
-// a mano.
-elClienteTipoContribuyente.addEventListener('change', () => {
-  if (elClienteId.value) return;
-  dibujarCheckboxesObligaciones(obtenerObligacionesSugeridas(elClienteTipoContribuyente.value));
-});
-
 // --- Mostrar / ocultar formulario ------------------------------------------
 
 function abrirFormularioNuevo() {
@@ -252,7 +221,6 @@ async function abrirFormularioEdicion(cliente) {
   elClienteRuc.value = cliente.ruc;
   elClienteRazonSocial.value = cliente.razon_social;
   elClienteTerminacionRuc.value = cliente.terminacion_ruc ?? '';
-  elClienteTipoContribuyente.value = cliente.tipo_contribuyente;
   elClienteResponsable.value = cliente.responsable;
   elClienteClaveMarangatu.value = cliente.clave_marangatu ?? '';
   elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
@@ -316,7 +284,6 @@ elForm.addEventListener('submit', async (evento) => {
     ruc: elClienteRuc.value.trim(),
     razon_social: elClienteRazonSocial.value.trim(),
     terminacion_ruc: elClienteTerminacionRuc.value === '' ? null : Number(elClienteTerminacionRuc.value),
-    tipo_contribuyente: elClienteTipoContribuyente.value,
     responsable: elClienteResponsable.value.trim(),
     clave_marangatu: elClienteClaveMarangatu.value.trim() || null,
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),

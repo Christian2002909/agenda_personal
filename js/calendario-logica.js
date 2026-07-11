@@ -6,17 +6,20 @@
 // reutilizar tanto en la pantalla de Calendario como en la de
 // Presentaciones (Fase 4).
 //
-// Reglas confirmadas con la SET (Resolución General 01/2007 y 38/2020):
+// Reglas confirmadas con la DNIT (Resolución General 01/2007 y 38/2020,
+// más el Calendario Perpetuo vigente para IVA/IRP/Rentas):
 //   - Cada terminación de RUC tiene un día fijo de vencimiento por mes.
 //   - IVA vence ese día del mismo mes (es mensual).
-//   - IRE SIMPLE vence en marzo del año siguiente al cierre fiscal.
+//   - IRE SIMPLE, IRP-RSP e IRP-RGC vencen en marzo del año siguiente al
+//     cierre fiscal (Formularios 141/515/516 en Sistema Marangatu).
 //   - IRE GENERAL y ESTADO FINANCIERO vencen en abril del año siguiente.
 //   - Si la fecha cae sábado, domingo o feriado, se corre al siguiente
 //     día hábil.
-//   - El cierre fiscal es por cliente (columna `clientes.cierre_fiscal_mes`,
-//     1-12, default 12 = diciembre). Todo lo que sigue está expresado en
-//     "meses posteriores al cierre", así que funciona para cualquier mes
-//     de cierre, no solo diciembre.
+//   - El cierre fiscal es por cliente (columna `clientes.cierre_fiscal_mes`).
+//     Según el Decreto 3182/2019 no es cualquier mes: 12 (diciembre, regla
+//     general), 4 (abril) o 6 (junio) — ver constraint en schema.sql. Todo
+//     lo que sigue está expresado en "meses posteriores al cierre", así
+//     que funciona para cualquiera de los tres.
 // -----------------------------------------------------------------------
 
 const CIERRE_FISCAL_MES_DEFAULT = 12;
@@ -34,6 +37,8 @@ const MESES_POSTERIORES_AL_CIERRE = {
   IRE_SIMPLE: 3,        // 3er mes posterior al cierre
   IRE_GENERAL: 4,       // 4to mes posterior al cierre
   ESTADO_FINANCIERO: 4, // se presenta junto con IRE GENERAL
+  IRP_RSP: 3,           // Formulario 515 (Marangatu), igual que IRE SIMPLE
+  IRP_RGC: 3,           // Formulario 516 (Marangatu), igual que IRE SIMPLE
 };
 
 function esFinDeSemana(fecha) {
