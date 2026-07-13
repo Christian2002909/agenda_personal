@@ -28,7 +28,52 @@
 // js/honorarios.js (generarFichaPago -> window.print()).
 // -----------------------------------------------------------------------
 
-const ExcelJS = require('exceljs');
+// `require('exceljs')` a nivel de archivo, sin try/catch, ROMPÍA por
+// completo tanto a js/clientes.js como a js/honorarios.js si por cualquier
+// motivo el paquete no estaba instalado (por ejemplo: se hizo `git pull` de
+// una rama que agregó esta dependencia -- ver commit "Cambiar la libreria
+// de Excel de xlsx a exceljs" -- sin volver a correr `npm install`; como
+// node_modules/ está en .gitignore, un `git pull` nunca lo instala solo).
+// El `require()` de este archivo pasa como la primera línea ejecutable de
+// clientes.js/honorarios.js, ANTES que cualquier document.getElementById(),
+// definición de función o listener de esos dos archivos -- si tira, TODO
+// el resto del archivo que lo importa queda sin ejecutar: ni el
+// autocompletado de RUC, ni los checkboxes de "Obligaciones de este
+// cliente", ni el <select> de Responsable, ni la tabla de Honorarios ni el
+// selector "Ver cartera de" se llegan a dibujar, y como mostrarMensaje()
+// tampoco llegó a definirse, no aparece ningún cartel de error en la
+// pantalla -- solo una excepción no capturada en la consola de DevTools.
+//
+// Para que un problema de esta librería (que solo hace falta para
+// Importar/Exportar Excel) no tumbe pantallas enteras que no tienen nada
+// que ver con Excel, dejamos `ExcelJS` en null si el require() falla, y
+// recién avisamos con un mensaje claro (ver exigirExcelJS) cuando el
+// usuario intenta usar una función que sí lo necesita -- mismo criterio
+// que ya usa js/supabaseClient.js con las credenciales de Supabase.
+let ExcelJS = null;
+try {
+  ExcelJS = require('exceljs');
+} catch (error) {
+  console.error(
+    'No se pudo cargar la librería "exceljs" (Importar/Exportar Excel no va a funcionar hasta solucionarlo). ' +
+      '¿Falta correr "npm install" después de un git pull reciente?',
+    error
+  );
+}
+
+// Se usa para distinguir, en los catch de clientes.js/honorarios.js, el
+// caso "la librería de Excel no está disponible" (mensaje accionable: hay
+// que correr npm install) del caso "el archivo .xlsx que subió el usuario
+// está mal" (mensaje genérico que ya mostraban esas pantallas).
+class ErrorLibreriaExcelNoDisponible extends Error {}
+
+function exigirExcelJS() {
+  if (!ExcelJS) {
+    throw new ErrorLibreriaExcelNoDisponible(
+      'No se pudo cargar la librería de Excel (exceljs). Cerrá la app, corré "npm install" en la carpeta del proyecto (así se termina de instalar) y volvé a abrirla.'
+    );
+  }
+}
 
 // Convierte el valor "crudo" de una celda de exceljs a un valor plano de
 // JS (string/number/Date/boolean), igual que hacía `xlsx` antes: resuelve
@@ -54,6 +99,7 @@ function celdaValorPlano(valor) {
 // objeto (más simple de validar fila por fila). Las filas completamente
 // vacías se saltean.
 async function leerFilasDeArchivoExcel(archivo) {
+  exigirExcelJS();
   const buffer = await archivo.arrayBuffer();
   const libro = new ExcelJS.Workbook();
   await libro.xlsx.load(buffer);
@@ -95,6 +141,7 @@ async function leerFilasDeArchivoExcel(archivo) {
 // array de objetos planos (una fila por objeto, las claves son las
 // columnas, tomadas del primer objeto de cada hoja).
 async function descargarComoExcel(nombreArchivo, hojas) {
+  exigirExcelJS();
   const libro = new ExcelJS.Workbook();
 
   for (const { nombre, filas } of hojas) {
@@ -150,4 +197,5 @@ module.exports = {
   celdaEsAfirmativa,
   celdaTexto,
   celdaNumero,
+  ErrorLibreriaExcelNoDisponible,
 };

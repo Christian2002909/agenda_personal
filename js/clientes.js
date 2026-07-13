@@ -16,7 +16,7 @@
 // Nota: esta ruta es relativa a index.html (no a este archivo), porque así
 // resuelve Node los require() dentro de un <script> cargado en la ventana.
 const supabase = require('./js/supabaseClient.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaEsAfirmativa, celdaTexto, celdaNumero } = require('./js/excel-utils.js');
+const { leerFilasDeArchivoExcel, descargarComoExcel, celdaEsAfirmativa, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
 
 // --- Referencias a elementos del HTML -----------------------------------
 const elMensaje = document.getElementById('mensaje');
@@ -313,8 +313,18 @@ elBtnCancelar.addEventListener('click', abrirFormularioNuevo);
 // Cuando el usuario escribe el RUC, sugerimos automáticamente la
 // terminación (el último dígito antes del guion), pero el usuario siempre
 // puede corregirla a mano después.
+//
+// Antes exigía `^(\d+)-\d$` -- todo el string tenía que ser EXACTAMENTE
+// "dígitos-un dígito" con el `$` anclado al final, así que no disparaba
+// hasta terminar de tipear el RUC COMPLETO, dígito verificador incluido.
+// Eso era innecesariamente estricto: la terminación sale del último dígito
+// de la base (antes del guion), no del dígito verificador, así que alcanza
+// con que ya haya un guion después de al menos un dígito para poder
+// sugerirla -- no hace falta esperar a que el campo quede en su forma
+// final. También tolera espacios pegados al guion (por si se pega un RUC
+// copiado de otro lado, ej. "80012345 - 6" o "80012345- 6").
 elClienteRuc.addEventListener('input', () => {
-  const coincidencia = elClienteRuc.value.match(/^(\d+)-\d$/);
+  const coincidencia = elClienteRuc.value.match(/^\s*(\d+)\s*-/);
   if (coincidencia) {
     const numeroSinDigitoVerificador = coincidencia[1];
     const ultimoDigito = numeroSinDigitoVerificador.slice(-1);
@@ -586,7 +596,11 @@ async function importarClientesDesdeExcel(archivo) {
     if (creados > 0 || actualizados > 0) abrirFormularioNuevo();
   } catch (error) {
     console.error('Error al importar clientes desde Excel:', error);
-    mostrarMensaje('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error', true);
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensaje(error.message, 'error', true);
+    } else {
+      mostrarMensaje('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error', true);
+    }
   } finally {
     elBtnImportarClientes.disabled = false;
     elInputImportarClientes.value = '';
@@ -667,7 +681,11 @@ async function exportarClientesAExcel() {
     ]);
   } catch (error) {
     console.error('Error al exportar clientes a Excel:', error);
-    mostrarMensaje('No se pudo exportar el Excel de clientes.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensaje(error.message, 'error', true);
+    } else {
+      mostrarMensaje('No se pudo exportar el Excel de clientes.', 'error');
+    }
   } finally {
     elBtnExportarClientes.disabled = false;
   }

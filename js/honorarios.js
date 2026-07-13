@@ -34,7 +34,7 @@
 
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero } = require('./js/excel-utils.js');
+const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
 const elHonorariosBuscar = document.getElementById('honorarios-buscar');
@@ -1179,7 +1179,11 @@ async function importarCuotasDesdeExcel(archivo) {
     if (creados > 0 || actualizados > 0) await cargarHonorarios();
   } catch (error) {
     console.error('Error al importar cuotas desde Excel:', error);
-    mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    }
   } finally {
     elBtnImportarCuotas.disabled = false;
     elInputImportarCuotas.value = '';
@@ -1289,7 +1293,11 @@ async function importarPagosDesdeExcel(archivo) {
     if (insertados > 0) await cargarHonorarios();
   } catch (error) {
     console.error('Error al importar pagos desde Excel:', error);
-    mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    }
   } finally {
     elBtnImportarPagos.disabled = false;
     elInputImportarPagos.value = '';
@@ -1353,7 +1361,11 @@ async function exportarHonorariosAExcel() {
     ]);
   } catch (error) {
     console.error('Error al exportar honorarios a Excel:', error);
-    mostrarMensajeHonorarios('No se pudo exportar el Excel de honorarios.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo exportar el Excel de honorarios.', 'error');
+    }
   } finally {
     elBtnExportarHonorarios.disabled = false;
   }
