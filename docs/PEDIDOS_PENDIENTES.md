@@ -15,6 +15,7 @@ Este documento junta, en las palabras del usuario, todo lo que falta implementar
 ## Pantalla Clientes
 
 - [ ] **Campo "Responsable" pasa de texto libre a lista desplegable**: en vez de tipear el nombre a mano (hoy `placeholder="Ej: Christian"`), mostrar un `<select>` con los nombres de la gente que ya tiene su usuario creado en el sistema (se lee de la tabla `perfiles`). Alcance confirmado por el usuario: SOLO este cambio de campo — no incluye (todavía) filtrar/ver la cartera de cada uno, eso sigue pausado aparte.
+- [ ] **Al tildar las obligaciones del cliente, agregar RG 90 como DOS opciones separadas** ("RG 90 Mensual" cód. 955 y "RG 90 Anual" cód. 956) para que cada cliente tenga marcada la que le corresponde (según tenga IVA o no) — mismo patrón de checkbox que ya usan IVA/IRE/IRP-RSP/etc. Depende de que RG 90 se agregue primero al catálogo de obligaciones (ver ítem en Calendario más abajo).
 - [ ] **Sacar la sección "Membrete para la ficha de pago (opcional)" de este formulario** (el override por cliente individual, con nombre/dirección/teléfono). **CONFIRMADO por el usuario**: no se reemplaza por nada en Honorarios — el membrete queda ÚNICO Y CENTRALIZADO en Configuración ("Membrete General"), usado para TODOS los clientes por igual, sin override por cliente. Ver ítem actualizado en Configuración más abajo.
 
 ## Pantalla Configuración
@@ -31,6 +32,14 @@ Este documento junta, en las palabras del usuario, todo lo que falta implementar
   - Aunque el contribuyente no haya tenido movimientos en el mes/año, igual tiene que hacer la confirmación (declaración en cero) — o sea, siempre genera un vencimiento, nunca se puede asumir "no aplica" por falta de actividad.
   - Al confirmarse, Marangatu genera un "Comprobante de Presentación" — mapea directo al mecanismo que ya existe en el sistema (checkbox de presentado + fecha), no hace falta un mecanismo nuevo aparte del que ya tienen IVA/IRE/etc.
   - Fuentes: [RG N° 90 — DNIT](https://www.dnit.gov.py/documents/d/global/rg-n-90-registro-de-comprobantes-de-ingresos-ventas-egresos-y-compras_07_05_2021), [Guía paso a paso — confirmar presentación de comprobantes (DNIT)](https://www.dnit.gov.py/documents/20123/224724/Guia+Paso+a+Paso+-+C%C3%B3mo+confirmar+la+presentaci%C3%B3n+de+los+comprobantes+registrados.pdf), [Registro electrónico de comprobantes — Resolución 90/2021 (Estudio Contable Lic. Elisabeth Neufeld de Mueller)](https://www.ecmueller.com.py/es/registro-electronico-de-comprobantes-res-90-2021/), [Conclusiones — Registro de Documentos Sistema Marangatu RG N° 90 (II) — Rodríguez Silvero & Asociados](https://rsa.com.py/conclusiones-registro-de-documentos-sistema-marangatu-rg-n-90-ii/)
+
+## Pantalla Historial
+
+- [ ] **[BUG] Confirmado: el mismo cartel rojo pegado también aparece acá** ("No se pudo cargar el historial.") — mismo bug de fondo ya anotado arriba (Presentaciones), se corrige junto con las demás pantallas afectadas.
+- [ ] **Rediseñar el layout de la grilla mensual** — hoy queda "mal estirada" (la tabla de 12 columnas de mes se corta/desborda feo). Revisar el diseño para que se vea bien sin tener que scrollear tanto.
+- [ ] **Historial pasa a ser editable, no solo de lectura**: hoy solo calcula y colorea fechas (verde/rojo/gris) pero no se puede tocar nada. Se pide poder marcar "Presentado" para CUALQUIER período pasado directamente desde acá (no solo el vigente, que es lo único editable hoy desde Presentaciones/Calendario) — motivo: cuando un período termina, Presentaciones lo "limpia" y pasa a Historial de solo lectura, así que si en su momento no se tildó, hoy no hay forma de corregirlo después. Al marcar un período viejo como presentado, la fecha de presentación se pone automática (la fecha de hoy, el día en que se tilda) — **confirmado por el usuario, no hace falta selector de fecha retroactiva**. Implica que Historial va a tener que poder crear/actualizar filas en `presentaciones` para períodos que hoy no tienen fila (la tabla `presentaciones` solo se genera automáticamente para el período vigente).
+- [ ] **Ampliar el rango de años visibles**: hoy solo muestra el año actual (mensuales) o actual+anterior (anuales) — se pide un rango más amplio, ejemplo dado por el usuario: 2022, 2023, 2024, 2025, 2026. Definir si es un selector de año o se listan todos esos años a la vez (a confirmar antes de programar).
+- [ ] **Agregar RG 90 al filtro de Obligación** (mensual 955 y anual 956), igual que el resto de las obligaciones — depende de que se agregue primero al catálogo (ver ítem en Calendario).
 
 ## General (todo el sistema)
 
