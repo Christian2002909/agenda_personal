@@ -265,8 +265,7 @@ elHonorariosBuscar.addEventListener('input', dibujarTablaHonorarios);
 
 // Solo se muestra si estamos en febrero o después (misma regla de gracia
 // que contarPeriodosAdeudables) Y si el panel "panel_honorarios_cuota_anual"
-// de Configuración > Paneles está activado (mismo patrón que
-// js/calendario.js usa para sus propios paneles: leer configuracion_estudio
+// de Configuración > Paneles está activado (se lee configuracion_estudio
 // al cargar la pantalla).
 function dibujarSeccionHonorariosAnual() {
   if (!elSeccionHonorariosAnual || !elTablaHonorariosAnualBody) return;
