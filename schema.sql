@@ -224,12 +224,19 @@ create table if not exists public.obligaciones (
 );
 
 comment on table  public.obligaciones is
-    'Catálogo FIJO de obligaciones fiscales (5 filas precargadas, no se insertan/editan desde la app). Ver INSERT de carga inicial más abajo.';
+    'Catálogo FIJO de obligaciones fiscales (9 filas precargadas, no se insertan/editan desde la app). Ver INSERT de carga inicial más abajo.';
 comment on column public.obligaciones.periodicidad is
-    'mensual = vence todos los meses (IVA). anual = vence una vez al año (IRE SIMPLE/GENERAL, ESTADO FINANCIERO). manual = nunca se genera solo; se crea a mano cuando corresponde (IDU).';
+    'mensual = vence todos los meses (IVA, RG 90 Mensual). anual = vence una vez al año (IRE SIMPLE/GENERAL, ESTADO FINANCIERO, IRP-RSP/RGC, RG 90 Anual). manual = nunca se genera solo; se crea a mano cuando corresponde (IDU).';
 
 -- Carga inicial (idempotente: si se corre de nuevo, actualiza nombre y
 -- periodicidad en vez de duplicar filas).
+-- RG 90 (Registro de Comprobantes, Resolución General N° 90/2021 - DNIT,
+-- Sistema Marangatu): dos variantes, cada una con su propia regla de
+-- vencimiento (ver calendario-logica.js). En Marangatu se identifican como
+-- "código 955" (mensual, contribuyentes de IVA) y "código 956" (anual,
+-- contribuyentes de IRP-RSP que NO son de IVA) — se dejan como comentario
+-- acá porque `codigo` en esta tabla sigue la convención mnemónica del
+-- resto del catálogo (IVA, IRE_SIMPLE, etc.), no los códigos de Marangatu.
 insert into public.obligaciones (codigo, nombre, periodicidad) values
     ('IVA',               'IVA',                'mensual'),
     ('IRE_SIMPLE',        'IRE SIMPLE',          'anual'),
@@ -237,7 +244,9 @@ insert into public.obligaciones (codigo, nombre, periodicidad) values
     ('ESTADO_FINANCIERO', 'ESTADO FINANCIERO',   'anual'),
     ('IRP_RSP',           'IRP-RSP',             'anual'),
     ('IRP_RGC',           'IRP-RGC',             'anual'),
-    ('IDU',               'IDU',                'manual')
+    ('IDU',               'IDU',                'manual'),
+    ('RG90_MENSUAL',      'RG 90 Mensual',       'mensual'),
+    ('RG90_ANUAL',        'RG 90 Anual',         'anual')
 on conflict (codigo) do update
     set nombre       = excluded.nombre,
         periodicidad = excluded.periodicidad;
@@ -388,6 +397,10 @@ create index if not exists idx_calendario_obligacion_id
 --    que es la regla general, esto da los meses de siempre):
 --      - IVA               (mensual): mismo mes que el período declarado
 --                                     (no depende del cierre fiscal).
+--      - RG 90 MENSUAL     (mensual): mismo día/mes que IVA (mismo cálculo,
+--                                     código 955 en Marangatu). Para
+--                                     contribuyentes de IVA + IRP-RSP o
+--                                     IVA + IRE SIMPLE.
 --      - IRE SIMPLE        (anual):   3er mes posterior al cierre.
 --                                     Cierre 31/12 => vence en MARZO.
 --      - IRP-RSP           (anual):   3er mes posterior al cierre, igual
@@ -400,6 +413,17 @@ create index if not exists idx_calendario_obligacion_id
 --                                     Cierre 31/12 => vence en ABRIL.
 --      - ESTADO FINANCIERO (anual):   mismo vencimiento que IRE GENERAL
 --                                     (se presentan juntos, mismo mes/día).
+--      - RG 90 ANUAL       (anual):   2do mes posterior al cierre (código
+--                                     956 en Marangatu). Cierre 31/12 =>
+--                                     vence en FEBRERO. Para contribuyentes
+--                                     de IRP-RSP que NO son de IVA. El día
+--                                     dentro del mes usa la misma tabla de
+--                                     terminación de RUC que el resto: es
+--                                     una asunción documentada (no hay
+--                                     tabla propia publicada por Marangatu
+--                                     para esta obligación), confirmada con
+--                                     el usuario, a ajustar si en la
+--                                     práctica no coincide.
 --      - IDU               (manual):  NO se genera automáticamente en
 --                                     ningún período. Se crea a mano cuando
 --                                     el contador confirma que el cliente
@@ -597,7 +621,7 @@ alter table public.pagos_honorarios add constraint pagos_honorarios_forma_pago_v
     check (forma_pago in ('efectivo', 'transferencia', 'cheque'));
 
 comment on table public.pagos_honorarios is
-    'Historial de pagos de honorarios por cliente. Nunca se actualiza/borra un pago histórico; los pagos parciales se registran como filas adicionales del mismo período. tipo_honorario distingue si el pago es de la cuota mensual o la anual.';
+    'Historial de pagos de honorarios por cliente. Los pagos parciales se registran como filas adicionales del mismo período. tipo_honorario distingue si el pago es de la cuota mensual o la anual. La pantalla de Honorarios permite corregir (UPDATE) un pago ya cargado -monto/fecha/forma de pago/recibo- por si se cargó mal; nunca se borra uno.';
 
 -- Se recrea (en vez de "if not exists") porque el índice viejo no incluía
 -- tipo_honorario; "create index if not exists" no actualiza la definición
@@ -791,13 +815,20 @@ comment on table public.perfiles is
 
 alter table public.perfiles enable row level security;
 
+-- Antes cada usuario solo podía leer SU PROPIO perfil (using (id =
+-- auth.uid())). Se amplía a "cualquier autenticado puede leer cualquier
+-- perfil" porque la pantalla de Clientes necesita listar los nombres de
+-- todos los perfiles para armar el <select> de "Responsable" -- sigue sin
+-- exponerse nada a `anon`. Se elimina la policy vieja por nombre porque
+-- una policy con el mismo nombre no actualiza su condición sola.
 drop policy if exists "perfiles_leer_propio" on public.perfiles;
+drop policy if exists "perfiles_lectura_autenticados" on public.perfiles;
 
-create policy "perfiles_leer_propio"
+create policy "perfiles_lectura_autenticados"
     on public.perfiles
     for select
     to authenticated
-    using (id = auth.uid());
+    using (true);
 
 grant select on public.perfiles to authenticated;
 
@@ -818,14 +849,58 @@ create table if not exists public.configuracion_estudio (
     telefono          text,
     nota_vencimiento  text default 'Vencimiento: 1 al 10 de cada mes',
 
+    -- Logo del estudio para la ficha de pago, guardado como base64 (sin
+    -- Supabase Storage/buckets: es una sola imagen chica, la fila única de
+    -- esta tabla alcanza). NULL si todavía no se cargó ninguno.
+    logo_base64       text,
+
+    -- Interruptores para mostrar/ocultar paneles opcionales del sistema.
+    -- Todos arrancan en `true` (default) para no cambiar el comportamiento
+    -- actual de nadie hasta que alguien los apague a mano desde la pestaña
+    -- "Paneles" de Configuración.
+    panel_calendario_nuevo_ejercicio   boolean not null default true,
+    panel_calendario_columna_obligacion boolean not null default true,
+    panel_rg90_visible                 boolean not null default true,
+    -- Conectada en js/honorarios.js: si es false, oculta la sección de
+    -- cuota anual de Honorarios (que de por sí solo se muestra desde
+    -- febrero, ver esEnero() en ese archivo).
+    panel_honorarios_cuota_anual       boolean not null default true,
+
     updated_at        timestamptz not null default now(),
 
     constraint configuracion_estudio_singleton
         check (id = 1)
 );
 
+-- Migración para bases ya existentes creadas antes de estas columnas (la
+-- CREATE TABLE de arriba ya las incluye para instalaciones nuevas).
+alter table public.configuracion_estudio
+    add column if not exists logo_base64 text;
+
+alter table public.configuracion_estudio
+    add column if not exists panel_calendario_nuevo_ejercicio boolean not null default true;
+
+alter table public.configuracion_estudio
+    add column if not exists panel_calendario_columna_obligacion boolean not null default true;
+
+alter table public.configuracion_estudio
+    add column if not exists panel_rg90_visible boolean not null default true;
+
+alter table public.configuracion_estudio
+    add column if not exists panel_honorarios_cuota_anual boolean not null default true;
+
 comment on table public.configuracion_estudio is
-    'Membrete general del estudio para la ficha de pago (una sola fila, id=1). Un cliente puntual puede tener su propio membrete en clientes.membrete_*, que pisa a este.';
+    'Membrete general del estudio para la ficha de pago (una sola fila, id=1). Un cliente puntual puede tener su propio membrete en clientes.membrete_*, que pisa a este. También guarda los switches de paneles opcionales (panel_*).';
+comment on column public.configuracion_estudio.logo_base64 is
+    'Logo del estudio para la ficha de pago, codificado en base64 (sin Storage/buckets). NULL si no se cargó ninguno.';
+comment on column public.configuracion_estudio.panel_calendario_nuevo_ejercicio is
+    'Si es false, Calendario no muestra la sección "Obligaciones Anuales - Nuevo Ejercicio" en enero aunque corresponda por fecha.';
+comment on column public.configuracion_estudio.panel_calendario_columna_obligacion is
+    'Si es false, la tabla de Calendario no muestra la columna "Obligación".';
+comment on column public.configuracion_estudio.panel_rg90_visible is
+    'Si es false, RG90_MENSUAL/RG90_ANUAL se excluyen de los filtros de Obligación (Presentaciones/Historial) y de los checkboxes de asignación de obligaciones (Clientes).';
+comment on column public.configuracion_estudio.panel_honorarios_cuota_anual is
+    'Si es false, Honorarios no muestra la sección de cuota anual aunque corresponda por fecha (desde febrero, ver js/honorarios.js).';
 
 -- Fila única, creada una sola vez (si ya existe, no se toca).
 insert into public.configuracion_estudio (id)

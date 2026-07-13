@@ -1,9 +1,9 @@
 // js/honorarios.js
 // -----------------------------------------------------------------------
-// Pantalla de Honorarios. Configurar la cuota de un cliente (mensual y/o
-// anual) se hace desde la pantalla de Clientes, no acá -- esta pantalla
-// solo muestra el resultado, busca clientes, registra pagos, y genera la
-// ficha de pago descargable (PDF vía diálogo de impresión).
+// Pantalla de Honorarios. Muestra el estado de cada cliente (Al día/Debe),
+// permite registrar y corregir pagos, editar la cuota pactada, ver el
+// detalle de pagos de un cliente y generar la ficha de pago descargable
+// (PDF vía window.print()).
 //
 // "Al día" / "Debe" acumula TODA la deuda desde que se configuró el
 // honorario de ese cliente (honorarios.created_at), por separado para la
@@ -12,6 +12,15 @@
 // multiplica por el monto pactado de esa cuota, y le resta la suma de los
 // pagos históricos de esa misma cuota (tipo_honorario). El estado general
 // es "Debe" si cualquiera de las dos cuotas tiene saldo pendiente.
+//
+// Registrar un pago, editar la cuota pactada y ver el detalle de un
+// cliente se hacen todos expandiendo una fila-formulario debajo de la fila
+// del cliente en la tabla principal (mismo espíritu que el checkbox
+// "Presentado" de Presentaciones/Calendario, pero acá el check despliega
+// un mini-formulario en vez de guardar directo). Un pago ya cargado
+// también se puede corregir desde la tabla de Historial de Pagos (o desde
+// el detalle de un cliente), reemplazando esa fila por el mismo
+// mini-formulario, precargado, que guarda con UPDATE en vez de INSERT.
 // -----------------------------------------------------------------------
 
 (function () {
@@ -25,19 +34,21 @@ const elHonorariosBuscar = document.getElementById('honorarios-buscar');
 const elTablaHonorariosBody = document.getElementById('tabla-honorarios-body');
 const elSinHonorarios = document.getElementById('sin-honorarios');
 
-const elFormPago = document.getElementById('form-pago');
-const elPagoCliente = document.getElementById('pago-cliente');
-const elPagoTipo = document.getElementById('pago-tipo');
-const elPagoMonto = document.getElementById('pago-monto');
-const elPagoForma = document.getElementById('pago-forma');
-const elPagoRecibo = document.getElementById('pago-recibo');
-const elPagoFecha = document.getElementById('pago-fecha');
-const elPagoPeriodo = document.getElementById('pago-periodo');
+const elSeccionHonorariosAnual = document.getElementById('seccion-honorarios-anual');
+const elTablaHonorariosAnualBody = document.getElementById('tabla-honorarios-anual-body');
 
+const elPagosFiltroAnio = document.getElementById('pagos-filtro-anio');
+const elPagosFiltroMes = document.getElementById('pagos-filtro-mes');
 const elTablaPagosBody = document.getElementById('tabla-pagos-body');
 const elSinPagos = document.getElementById('sin-pagos');
 
 const elFichaImprimir = document.getElementById('ficha-pago-imprimir');
+
+// Cantidad de columnas de cualquier tabla que muestre filas de pago
+// (Historial de Pagos y el detalle de un cliente comparten exactamente las
+// mismas columnas -- ver construirFilaPagoHtml), usada para el colspan del
+// formulario de edición en línea.
+const PAGO_COLSPAN = 8;
 
 const NOMBRES_MES_COMPLETOS = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -84,6 +95,15 @@ function escaparHtmlHonorarios(texto) {
   return div.innerHTML;
 }
 
+// Enero es el único mes en que la cuota ANUAL todavía no cuenta como
+// adeudada (regla confirmada por el usuario, ver contarPeriodosAdeudables)
+// y en que la sección de cuota anual permanece oculta -- mismo criterio en
+// los dos lugares, para no mostrar como pendiente algo que todavía no
+// corresponde reclamar.
+function esEnero() {
+  return new Date().getMonth() === 0;
+}
+
 // --- Carga inicial -------------------------------------------------------
 
 async function cargarHonorarios() {
@@ -116,8 +136,13 @@ async function cargarHonorarios() {
     configuracionEstudio = configuracion || null;
 
     dibujarTablaHonorarios();
+    dibujarSeccionHonorariosAnual();
+    poblarFiltroAnioPagos();
     dibujarTablaPagos();
-    poblarSelectClientesPago();
+    // La carga salió bien: si había quedado pegado un cartel de error de
+    // un intento anterior (por ejemplo, el primero antes de loguearse), lo
+    // ocultamos.
+    if (elHonorariosMensaje) elHonorariosMensaje.classList.add('oculto');
   } catch (error) {
     console.error('Error al cargar honorarios:', error);
     mostrarMensajeHonorarios('No se pudieron cargar los honorarios.', 'error');
@@ -128,7 +153,7 @@ async function cargarHonorarios() {
 
 // Cuenta cuántos períodos (meses o años) hay que pagar desde que se
 // configuró el honorario (created_at) hasta el período vigente, ambos
-// inclusive. Nunca da menos de 1.
+// inclusive. Nunca da menos de 1 para la cuota mensual.
 function contarPeriodosAdeudables(fechaCreacion, periodicidad, cierreFiscalMes) {
   if (periodicidad === 'mensual') {
     const inicio = new Date(fechaCreacion.getFullYear(), fechaCreacion.getMonth(), 1);
@@ -140,8 +165,19 @@ function contarPeriodosAdeudables(fechaCreacion, periodicidad, cierreFiscalMes) 
   const mesCreacion = fechaCreacion.getMonth() + 1;
   const anioEjercicioInicio = mesCreacion > cierreFiscalMes ? fechaCreacion.getFullYear() : fechaCreacion.getFullYear() - 1;
   const vigente = obtenerPeriodoVigente('anual', cierreFiscalMes);
-  const anios = vigente.getFullYear() - anioEjercicioInicio + 1;
-  return Math.max(anios, 1);
+  let anios = Math.max(vigente.getFullYear() - anioEjercicioInicio + 1, 1);
+
+  // Regla de febrero (confirmada por el usuario): la cuota anual del
+  // período vigente no cuenta como adeudada hasta febrero de cada año, sin
+  // importar hace cuánto se configuró el honorario de ese cliente. Los
+  // ejercicios anteriores (ya cerrados hace rato) siguen contando igual
+  // que antes -- solo se descuenta el período vigente, y nunca por debajo
+  // de cero.
+  if (esEnero()) {
+    anios = Math.max(anios - 1, 0);
+  }
+
+  return anios;
 }
 
 // Saldo pendiente de UNA de las dos cuotas (mensual o anual). Devuelve
@@ -200,114 +236,365 @@ function dibujarTablaHonorarios() {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
     const resultado = calcularEstadoHonorario(honorario, cliente);
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
+    const filaCliente = document.createElement('tr');
+    filaCliente.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${honorario?.monto_mensual ? formatearGuaranies(honorario.monto_mensual) : '—'}</td>
       <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
       <td>${dibujarBadgeEstado(resultado)}</td>
-      <td><button class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button></td>
+      <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
+      <td>
+        <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
+        <button type="button" class="boton boton-chico" data-editar-cuota-id="${cliente.id}">Editar cuota</button>
+        <button type="button" class="boton boton-chico" data-detalle-cliente-id="${cliente.id}">Detalle</button>
+      </td>
     `;
-    elTablaHonorariosBody.appendChild(tr);
+    elTablaHonorariosBody.appendChild(filaCliente);
+
+    const filaExpandible = document.createElement('tr');
+    filaExpandible.className = 'fila-expandible oculto';
+    filaExpandible.dataset.expandibleId = cliente.id;
+    filaExpandible.innerHTML = `<td colspan="6"></td>`;
+    elTablaHonorariosBody.appendChild(filaExpandible);
   }
 }
 
 elHonorariosBuscar.addEventListener('input', dibujarTablaHonorarios);
 
-elTablaHonorariosBody.addEventListener('click', (evento) => {
-  const boton = evento.target.closest('button[data-ficha-cliente-id]');
-  if (!boton) return;
+// --- Cuota Anual: sección aparte, solo desde febrero ----------------------
 
-  const clienteId = Number(boton.dataset.fichaClienteId);
+// Solo se muestra si estamos en febrero o después (misma regla de gracia
+// que contarPeriodosAdeudables) Y si el panel "panel_honorarios_cuota_anual"
+// de Configuración > Paneles está activado (mismo patrón que
+// js/calendario.js usa para sus propios paneles: leer configuracion_estudio
+// al cargar la pantalla).
+function dibujarSeccionHonorariosAnual() {
+  if (!elSeccionHonorariosAnual || !elTablaHonorariosAnualBody) return;
+
+  const panelActivo = configuracionEstudio?.panel_honorarios_cuota_anual ?? true;
+
+  if (esEnero() || !panelActivo) {
+    elSeccionHonorariosAnual.classList.add('oculto');
+    return;
+  }
+
+  elSeccionHonorariosAnual.classList.remove('oculto');
+  elTablaHonorariosAnualBody.innerHTML = '';
+
+  const clientesConCuotaAnual = clientesCacheHonorarios.filter((cliente) => {
+    const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
+    return honorario?.monto_anual !== null && honorario?.monto_anual !== undefined;
+  });
+
+  if (clientesConCuotaAnual.length === 0) {
+    elTablaHonorariosAnualBody.innerHTML = `<tr><td colspan="3" class="sin-datos">No hay clientes con cuota anual configurada.</td></tr>`;
+    return;
+  }
+
+  for (const cliente of clientesConCuotaAnual) {
+    const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
+    const saldoAnual = calcularSaldoPorTipo(honorario, cliente, 'anual') ?? 0;
+    const estadoAnual = { estado: saldoAnual > 0 ? 'debe' : 'al_dia', saldoPendiente: saldoAnual };
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
+      <td>${formatearGuaranies(honorario.monto_anual)}</td>
+      <td>${dibujarBadgeEstado(estadoAnual)}</td>
+    `;
+    elTablaHonorariosAnualBody.appendChild(tr);
+  }
+}
+
+// --- Filas expandibles de la tabla principal (pago / editar cuota / detalle) --
+
+function cerrarTodasLasFilasExpandibles() {
+  elTablaHonorariosBody.querySelectorAll('tr.fila-expandible').forEach((fila) => {
+    fila.classList.add('oculto');
+    fila.querySelector('td').innerHTML = '';
+  });
+  elTablaHonorariosBody.querySelectorAll('input[data-pagar-cliente]').forEach((casilla) => {
+    casilla.checked = false;
+  });
+}
+
+function cerrarFilaExpandible(clienteId) {
+  const fila = elTablaHonorariosBody.querySelector(`tr.fila-expandible[data-expandible-id="${clienteId}"]`);
+  if (fila) {
+    fila.classList.add('oculto');
+    fila.querySelector('td').innerHTML = '';
+  }
+  const casilla = elTablaHonorariosBody.querySelector(`input[data-pagar-cliente="${clienteId}"]`);
+  if (casilla) casilla.checked = false;
+}
+
+// Abre la fila expandible del cliente con el HTML dado, cerrando primero
+// cualquier otra fila que hubiera quedado abierta (una sola a la vez).
+function abrirFilaExpandible(clienteId, html) {
+  cerrarTodasLasFilasExpandibles();
+  const fila = elTablaHonorariosBody.querySelector(`tr.fila-expandible[data-expandible-id="${clienteId}"]`);
+  if (!fila) return;
+  fila.querySelector('td').innerHTML = html;
+  fila.classList.remove('oculto');
+}
+
+// --- Período (mes+año o solo año) para el formulario de pago -------------
+
+function generarOpcionesAnioSelect(anioSeleccionado) {
+  const anioActual = new Date().getFullYear();
+  let html = '';
+  for (let anio = anioActual - 5; anio <= anioActual + 1; anio += 1) {
+    html += `<option value="${anio}" ${anio === anioSeleccionado ? 'selected' : ''}>${anio}</option>`;
+  }
+  return html;
+}
+
+function generarOpcionesMesSelect(mesSeleccionado) {
+  return NOMBRES_MES_COMPLETOS
+    .map((nombre, indice) => `<option value="${indice + 1}" ${indice + 1 === mesSeleccionado ? 'selected' : ''}>${nombre}</option>`)
+    .join('');
+}
+
+// Devuelve el HTML de los campos de período según el tipo de cuota: mes+año
+// para la mensual, solo año para la anual. `fechaPeriodo` es un Date que
+// marca qué mes/año sugerir por defecto (editable para cargar pagos
+// atrasados).
+function construirCamposPeriodoHtml(tipo, fechaPeriodo) {
+  const anioSeleccionado = fechaPeriodo.getFullYear();
+
+  if (tipo === 'mensual') {
+    const mesSeleccionado = fechaPeriodo.getMonth() + 1;
+    return `
+      <label>Período</label>
+      <div class="grupo-periodo-mensual">
+        <select class="campo-periodo-mes">${generarOpcionesMesSelect(mesSeleccionado)}</select>
+        <select class="campo-periodo-anio">${generarOpcionesAnioSelect(anioSeleccionado)}</select>
+      </div>
+    `;
+  }
+
+  return `
+    <label>Año</label>
+    <select class="campo-periodo-anio">${generarOpcionesAnioSelect(anioSeleccionado)}</select>
+  `;
+}
+
+// --- Formulario de pago (registrar nuevo o editar uno existente) ---------
+
+// Arma el mini-formulario de pago. Si `pagoExistente` es null, es para
+// registrar un pago nuevo (sugiere el período vigente y el monto pactado);
+// si viene un pago, es para corregirlo (precarga sus valores actuales y
+// guarda con UPDATE en vez de INSERT -- ver guardarPagoInline).
+function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
+  const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
+  const tieneMensual = honorario.monto_mensual !== null && honorario.monto_mensual !== undefined;
+  const tieneAnual = honorario.monto_anual !== null && honorario.monto_anual !== undefined;
+  const tipoInicial = pagoExistente?.tipo_honorario || (tieneMensual ? 'mensual' : 'anual');
+
+  const selectorTipoHtml = (tieneMensual && tieneAnual)
+    ? `
+      <div class="fila-form">
+        <label>Corresponde a</label>
+        <select class="campo-pago-tipo">
+          <option value="mensual" ${tipoInicial === 'mensual' ? 'selected' : ''}>Cuota Mensual</option>
+          <option value="anual" ${tipoInicial === 'anual' ? 'selected' : ''}>Cuota Anual</option>
+        </select>
+      </div>`
+    : `<input type="hidden" class="campo-pago-tipo" value="${tipoInicial}" />`;
+
+  const montoInicial = pagoExistente
+    ? pagoExistente.monto_pagado
+    : ((tipoInicial === 'mensual' ? honorario.monto_mensual : honorario.monto_anual) || '');
+
+  const fechaInicial = pagoExistente ? pagoExistente.fecha_pago : formatearFechaISO(new Date());
+  const reciboInicial = pagoExistente?.numero_recibo || '';
+  const formaInicial = pagoExistente?.forma_pago || 'efectivo';
+
+  const periodoFecha = pagoExistente
+    ? new Date(`${pagoExistente.periodo}T00:00:00`)
+    : obtenerPeriodoVigente(tipoInicial, cierreFiscalMes);
+
+  return `
+    <form class="form-pago-inline" data-cliente-id="${cliente.id}" ${pagoExistente ? `data-pago-id="${pagoExistente.id}"` : ''}>
+      <h3 class="fila-form-titulo">${pagoExistente ? 'Editar Pago' : 'Registrar Pago'} — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      <div class="grilla-form-inline">
+        ${selectorTipoHtml}
+        <div class="fila-form">
+          <label>Monto Pagado (Gs.)</label>
+          <input type="number" class="campo-pago-monto" min="1" step="1" required value="${montoInicial}" />
+        </div>
+        <div class="fila-form">
+          <label>Forma de Pago</label>
+          <select class="campo-pago-forma">
+            <option value="efectivo" ${formaInicial === 'efectivo' ? 'selected' : ''}>Efectivo</option>
+            <option value="transferencia" ${formaInicial === 'transferencia' ? 'selected' : ''}>Transferencia</option>
+            <option value="cheque" ${formaInicial === 'cheque' ? 'selected' : ''}>Cheque</option>
+          </select>
+        </div>
+        <div class="fila-form">
+          <label>N° de Recibo</label>
+          <input type="text" class="campo-pago-recibo" placeholder="Ej: 0231" spellcheck="true" value="${escaparHtmlHonorarios(reciboInicial)}" />
+        </div>
+        <div class="fila-form">
+          <label>Fecha de Pago</label>
+          <input type="date" class="campo-pago-fecha" value="${fechaInicial}" />
+        </div>
+        <div class="fila-form campo-pago-periodo-contenedor">
+          ${construirCamposPeriodoHtml(tipoInicial, periodoFecha)}
+        </div>
+      </div>
+      <div class="acciones-form">
+        <button type="submit" class="boton boton-primario boton-chico">Guardar Pago</button>
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cancelar</button>
+      </div>
+    </form>
+  `;
+}
+
+function abrirFormularioPago(clienteId) {
   const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
   const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
   if (!cliente || !honorario) return;
-
-  generarFichaPago(cliente, honorario);
-});
-
-// --- Formulario de registrar pago ----------------------------------------
-
-function poblarSelectClientesPago() {
-  const seleccionActual = elPagoCliente.value;
-  elPagoCliente.innerHTML = '<option value="">Seleccioná un cliente</option>';
-
-  for (const cliente of clientesCacheHonorarios) {
-    const opcion = document.createElement('option');
-    opcion.value = cliente.id;
-    opcion.textContent = cliente.razon_social;
-    elPagoCliente.appendChild(opcion);
-  }
-
-  if (seleccionActual) elPagoCliente.value = seleccionActual;
+  abrirFilaExpandible(clienteId, construirFormularioPagoHtml(cliente, honorario));
 }
 
-// Al elegir un cliente o cambiar a qué cuota corresponde, sugerimos el
-// período vigente y el monto pactado de esa cuota. El contador puede
-// corregir ambos si el pago es de un período anterior o un monto distinto.
-function actualizarSugerenciaPago() {
-  const clienteId = Number(elPagoCliente.value);
+// Al cambiar el tipo de cuota en el formulario (solo posible si el cliente
+// tiene las dos), actualizamos el monto sugerido y los campos de período.
+function actualizarCamposSegunTipoInline(selectTipo) {
+  const form = selectTipo.closest('form.form-pago-inline');
+  if (!form) return;
+
+  const clienteId = Number(form.dataset.clienteId);
   const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
   const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
-  const tipo = elPagoTipo.value;
+  const tipo = selectTipo.value;
   const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
 
-  elPagoPeriodo.value = formatearFechaISO(obtenerPeriodoVigente(tipo, cierreFiscalMes));
+  const montoInput = form.querySelector('.campo-pago-monto');
+  const montoSugerido = tipo === 'mensual' ? honorario?.monto_mensual : honorario?.monto_anual;
+  if (montoInput && montoSugerido) montoInput.value = montoSugerido;
 
-  const monto = honorario ? (tipo === 'mensual' ? honorario.monto_mensual : honorario.monto_anual) : null;
-  if (monto) elPagoMonto.value = monto;
+  const contenedorPeriodo = form.querySelector('.campo-pago-periodo-contenedor');
+  if (contenedorPeriodo) {
+    contenedorPeriodo.innerHTML = construirCamposPeriodoHtml(tipo, obtenerPeriodoVigente(tipo, cierreFiscalMes));
+  }
 }
 
-elPagoCliente.addEventListener('change', actualizarSugerenciaPago);
-elPagoTipo.addEventListener('change', actualizarSugerenciaPago);
+async function guardarPagoInline(form) {
+  const clienteId = Number(form.dataset.clienteId);
+  const pagoId = form.dataset.pagoId ? Number(form.dataset.pagoId) : null;
 
-elFormPago.addEventListener('submit', async (evento) => {
-  evento.preventDefault();
+  const tipo = form.querySelector('.campo-pago-tipo').value;
+  const monto = Number(form.querySelector('.campo-pago-monto').value);
+  const forma = form.querySelector('.campo-pago-forma').value;
+  const recibo = form.querySelector('.campo-pago-recibo').value.trim() || null;
+  const fecha = form.querySelector('.campo-pago-fecha').value || formatearFechaISO(new Date());
+  const selectMes = form.querySelector('.campo-periodo-mes');
+  const selectAnio = form.querySelector('.campo-periodo-anio');
+  const anio = Number(selectAnio.value);
 
-  if (!elPagoCliente.value) {
-    mostrarMensajeHonorarios('Elegí un cliente antes de registrar el pago.', 'error');
-    return;
-  }
+  const periodo = tipo === 'mensual'
+    ? formatearFechaISO(new Date(anio, Number(selectMes.value) - 1, 1))
+    : formatearFechaISO(new Date(anio, 0, 1));
 
   const datosPago = {
-    cliente_id: Number(elPagoCliente.value),
-    tipo_honorario: elPagoTipo.value,
-    monto_pagado: Number(elPagoMonto.value),
-    forma_pago: elPagoForma.value,
-    numero_recibo: elPagoRecibo.value.trim() || null,
-    fecha_pago: elPagoFecha.value || formatearFechaISO(new Date()),
-    periodo: elPagoPeriodo.value,
+    cliente_id: clienteId,
+    tipo_honorario: tipo,
+    monto_pagado: monto,
+    forma_pago: forma,
+    numero_recibo: recibo,
+    fecha_pago: fecha,
+    periodo,
   };
 
   try {
-    const { error } = await supabaseHonorarios.from('pagos_honorarios').insert(datosPago);
+    const { error } = pagoId
+      ? await supabaseHonorarios.from('pagos_honorarios').update(datosPago).eq('id', pagoId)
+      : await supabaseHonorarios.from('pagos_honorarios').insert(datosPago);
+
     if (error) throw error;
 
-    mostrarMensajeHonorarios('Pago registrado correctamente.');
-    elFormPago.reset();
+    mostrarMensajeHonorarios(pagoId ? 'Pago actualizado correctamente.' : 'Pago registrado correctamente.');
     await cargarHonorarios();
   } catch (error) {
-    console.error('Error al registrar pago:', error);
-    mostrarMensajeHonorarios('No se pudo registrar el pago.', 'error');
+    console.error('Error al guardar el pago:', error);
+    mostrarMensajeHonorarios('No se pudo guardar el pago.', 'error');
   }
-});
+}
 
-// --- Tabla de historial de pagos ------------------------------------------
+// --- Editar la cuota pactada de un cliente (sin ir a Clientes) ------------
 
-function dibujarTablaPagos() {
-  elTablaPagosBody.innerHTML = '';
+function construirFormularioEditarCuotaHtml(cliente, honorario) {
+  return `
+    <form class="form-editar-cuota-inline" data-cliente-id="${cliente.id}">
+      <h3 class="fila-form-titulo">Editar Cuota — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      <div class="grilla-form-inline">
+        <div class="fila-form">
+          <label>Cuota Mensual (Gs.)</label>
+          <input type="number" class="campo-cuota-mensual" min="1" step="1" value="${honorario?.monto_mensual ?? ''}" />
+        </div>
+        <div class="fila-form">
+          <label>Cuota Anual (Gs.)</label>
+          <input type="number" class="campo-cuota-anual" min="1" step="1" value="${honorario?.monto_anual ?? ''}" />
+        </div>
+      </div>
+      <div class="acciones-form">
+        <button type="submit" class="boton boton-primario boton-chico">Guardar Cuota</button>
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cancelar</button>
+      </div>
+    </form>
+  `;
+}
 
-  if (pagosCache.length === 0) {
-    elSinPagos.classList.remove('oculto');
+function abrirFormularioEditarCuota(clienteId) {
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+  if (!cliente) return;
+  const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+  abrirFilaExpandible(clienteId, construirFormularioEditarCuotaHtml(cliente, honorario));
+}
+
+async function guardarCuotaInline(form) {
+  const clienteId = Number(form.dataset.clienteId);
+  const montoMensualTexto = form.querySelector('.campo-cuota-mensual').value;
+  const montoAnualTexto = form.querySelector('.campo-cuota-anual').value;
+  const montoMensual = montoMensualTexto ? Number(montoMensualTexto) : null;
+  const montoAnual = montoAnualTexto ? Number(montoAnualTexto) : null;
+
+  if (montoMensual === null && montoAnual === null) {
+    mostrarMensajeHonorarios('Cargá al menos una cuota (mensual o anual).', 'error');
     return;
   }
-  elSinPagos.classList.add('oculto');
 
-  for (const pago of pagosCache) {
-    const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
-    const tr = document.createElement('tr');
+  try {
+    // "upsert" sobre cliente_id (unique constraint honorarios_cliente_unique):
+    // actualiza la fila si ya existía honorario configurado para este
+    // cliente, o la crea si todavía no tenía ninguno.
+    const { error } = await supabaseHonorarios
+      .from('honorarios')
+      .upsert(
+        { cliente_id: clienteId, monto_mensual: montoMensual, monto_anual: montoAnual },
+        { onConflict: 'cliente_id' }
+      );
 
-    tr.innerHTML = `
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Cuota actualizada correctamente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al guardar la cuota:', error);
+    mostrarMensajeHonorarios('No se pudo guardar la cuota.', 'error');
+  }
+}
+
+// --- Detalle de pagos de un cliente ---------------------------------------
+
+// Fila de una tabla de pagos (Historial de Pagos o el detalle de un
+// cliente comparten exactamente el mismo formato de fila, con botón
+// "Editar" -- así se reutiliza el mismo mini-formulario de pago para
+// corregir un pago desde cualquiera de los dos lugares).
+function construirFilaPagoHtml(pago, cliente) {
+  return `
+    <tr data-fila-pago-id="${pago.id}">
       <td>${escaparHtmlHonorarios(cliente ? cliente.razon_social : 'Cliente eliminado')}</td>
       <td>${pago.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual'}</td>
       <td>${formatearGuaranies(pago.monto_pagado)}</td>
@@ -315,10 +602,218 @@ function dibujarTablaPagos() {
       <td>${pago.numero_recibo ? escaparHtmlHonorarios(pago.numero_recibo) : '—'}</td>
       <td>${formatearFechaVisibleHonorarios(pago.fecha_pago)}</td>
       <td>${formatearFechaVisibleHonorarios(pago.periodo)}</td>
-    `;
-    elTablaPagosBody.appendChild(tr);
+      <td><button type="button" class="boton boton-chico" data-editar-pago-id="${pago.id}">Editar</button></td>
+    </tr>
+  `;
+}
+
+function construirDetalleClienteHtml(cliente) {
+  const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
+  const resultado = calcularEstadoHonorario(honorario, cliente);
+
+  const pagosCliente = pagosCache
+    .filter((pago) => pago.cliente_id === cliente.id)
+    .sort((a, b) => (a.fecha_pago < b.fecha_pago ? 1 : -1));
+
+  const filasHtml = pagosCliente.length
+    ? pagosCliente.map((pago) => construirFilaPagoHtml(pago, cliente)).join('')
+    : `<tr><td colspan="${PAGO_COLSPAN}" class="sin-datos">Todavía no se registró ningún pago.</td></tr>`;
+
+  return `
+    <div class="detalle-cliente-inline">
+      <h3 class="fila-form-titulo">Historial de Pagos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      <p>Saldo pendiente: ${dibujarBadgeEstado(resultado)}</p>
+      <div class="tabla-scroll">
+        <table class="tabla-clientes">
+          <thead>
+            <tr>
+              <th>Cliente</th><th>Corresponde a</th><th>Monto</th><th>Forma de Pago</th>
+              <th>N° Recibo</th><th>Fecha de Pago</th><th>Período</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>${filasHtml}</tbody>
+        </table>
+      </div>
+      <div class="acciones-form">
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
+      </div>
+    </div>
+  `;
+}
+
+function abrirDetalleCliente(clienteId) {
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+  if (!cliente) return;
+  abrirFilaExpandible(clienteId, construirDetalleClienteHtml(cliente));
+}
+
+// Reemplaza, en el lugar, la fila de un pago por el mini-formulario de
+// edición precargado con sus valores actuales. Funciona tanto para una
+// fila de #tabla-pagos-body como para una fila dentro del detalle de un
+// cliente (ambas comparten data-fila-pago-id y el mismo formato).
+function abrirEdicionPagoEnFila(fila, pagoId) {
+  const pago = pagosCache.find((p) => p.id === pagoId);
+  if (!pago) return;
+  const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
+  const honorario = honorariosCache.find((h) => h.cliente_id === pago.cliente_id);
+  if (!cliente || !honorario) return;
+
+  fila.innerHTML = `<td colspan="${PAGO_COLSPAN}">${construirFormularioPagoHtml(cliente, honorario, pago)}</td>`;
+}
+
+// --- Manejo de eventos: tabla de Honorarios (fila del cliente) -----------
+
+elTablaHonorariosBody.addEventListener('change', (evento) => {
+  const casillaPagar = evento.target.closest('input[data-pagar-cliente]');
+  if (casillaPagar) {
+    const clienteId = Number(casillaPagar.dataset.pagarCliente);
+    if (casillaPagar.checked) {
+      abrirFormularioPago(clienteId);
+    } else {
+      cerrarFilaExpandible(clienteId);
+    }
+    return;
+  }
+
+  const selectTipo = evento.target.closest('.campo-pago-tipo');
+  if (selectTipo && selectTipo.tagName === 'SELECT') {
+    actualizarCamposSegunTipoInline(selectTipo);
+  }
+});
+
+elTablaHonorariosBody.addEventListener('click', (evento) => {
+  const botonFicha = evento.target.closest('button[data-ficha-cliente-id]');
+  if (botonFicha) {
+    const clienteId = Number(botonFicha.dataset.fichaClienteId);
+    const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+    const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+    if (cliente && honorario) generarFichaPago(cliente, honorario);
+    return;
+  }
+
+  const botonEditarCuota = evento.target.closest('button[data-editar-cuota-id]');
+  if (botonEditarCuota) {
+    abrirFormularioEditarCuota(Number(botonEditarCuota.dataset.editarCuotaId));
+    return;
+  }
+
+  const botonDetalle = evento.target.closest('button[data-detalle-cliente-id]');
+  if (botonDetalle) {
+    abrirDetalleCliente(Number(botonDetalle.dataset.detalleClienteId));
+    return;
+  }
+
+  const botonEditarPago = evento.target.closest('button[data-editar-pago-id]');
+  if (botonEditarPago) {
+    const filaPago = evento.target.closest('tr[data-fila-pago-id]');
+    if (filaPago) abrirEdicionPagoEnFila(filaPago, Number(botonEditarPago.dataset.editarPagoId));
+    return;
+  }
+
+  const botonCancelar = evento.target.closest('[data-cancelar-inline]');
+  if (botonCancelar) {
+    const filaPago = evento.target.closest('tr[data-fila-pago-id]');
+    const filaExpandible = evento.target.closest('tr.fila-expandible');
+    if (filaPago && filaExpandible) {
+      // Estábamos corrigiendo un pago dentro del detalle de un cliente:
+      // volvemos a pintar el detalle completo (sin volver a pedir datos).
+      abrirDetalleCliente(Number(filaExpandible.dataset.expandibleId));
+      return;
+    }
+    if (filaExpandible) cerrarFilaExpandible(Number(filaExpandible.dataset.expandibleId));
+  }
+});
+
+elTablaHonorariosBody.addEventListener('submit', async (evento) => {
+  const formPago = evento.target.closest('form.form-pago-inline');
+  if (formPago) {
+    evento.preventDefault();
+    await guardarPagoInline(formPago);
+    return;
+  }
+
+  const formCuota = evento.target.closest('form.form-editar-cuota-inline');
+  if (formCuota) {
+    evento.preventDefault();
+    await guardarCuotaInline(formCuota);
+  }
+});
+
+// --- Historial de pagos: filtro por período y edición en línea -----------
+
+// Puebla el filtro de año con los años que realmente tienen pagos
+// registrados (según pagos_honorarios.periodo), para no mostrar años
+// vacíos en el desplegable.
+function poblarFiltroAnioPagos() {
+  if (!elPagosFiltroAnio) return;
+
+  const seleccionActual = elPagosFiltroAnio.value;
+  const aniosDisponibles = [...new Set(pagosCache.map((pago) => pago.periodo.split('-')[0]))].sort((a, b) => b - a);
+
+  elPagosFiltroAnio.innerHTML = '<option value="">Todos</option>'
+    + aniosDisponibles.map((anio) => `<option value="${anio}">${anio}</option>`).join('');
+
+  if (aniosDisponibles.includes(seleccionActual)) elPagosFiltroAnio.value = seleccionActual;
+}
+
+// Filtra por período (año, y opcionalmente mes) -- para la cuota anual el
+// período siempre cae en enero (1° de enero del ejercicio), así que un
+// filtro de mes distinto de "Todos"/Enero naturalmente no muestra pagos
+// anuales, lo cual es esperable.
+function filtrarPagosParaTabla() {
+  const anio = elPagosFiltroAnio ? elPagosFiltroAnio.value : '';
+  const mes = elPagosFiltroMes ? elPagosFiltroMes.value : '';
+
+  return pagosCache.filter((pago) => {
+    const [anioPago, mesPago] = pago.periodo.split('-');
+    if (anio && anioPago !== anio) return false;
+    if (mes && Number(mesPago) !== Number(mes)) return false;
+    return true;
+  });
+}
+
+if (elPagosFiltroAnio) elPagosFiltroAnio.addEventListener('change', dibujarTablaPagos);
+if (elPagosFiltroMes) elPagosFiltroMes.addEventListener('change', dibujarTablaPagos);
+
+function dibujarTablaPagos() {
+  elTablaPagosBody.innerHTML = '';
+
+  const pagosFiltrados = filtrarPagosParaTabla();
+
+  if (pagosFiltrados.length === 0) {
+    elSinPagos.classList.remove('oculto');
+    return;
+  }
+  elSinPagos.classList.add('oculto');
+
+  for (const pago of pagosFiltrados) {
+    const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
+    elTablaPagosBody.insertAdjacentHTML('beforeend', construirFilaPagoHtml(pago, cliente));
   }
 }
+
+elTablaPagosBody.addEventListener('click', (evento) => {
+  const botonEditarPago = evento.target.closest('button[data-editar-pago-id]');
+  if (botonEditarPago) {
+    const filaPago = evento.target.closest('tr[data-fila-pago-id]');
+    if (filaPago) abrirEdicionPagoEnFila(filaPago, Number(botonEditarPago.dataset.editarPagoId));
+    return;
+  }
+
+  const botonCancelar = evento.target.closest('[data-cancelar-inline]');
+  if (botonCancelar) {
+    // Simplemente volvemos a dibujar la tabla desde la caché (sin pedir
+    // datos de nuevo): descarta la edición en curso y restaura la fila.
+    dibujarTablaPagos();
+  }
+});
+
+elTablaPagosBody.addEventListener('submit', async (evento) => {
+  const formPago = evento.target.closest('form.form-pago-inline');
+  if (!formPago) return;
+  evento.preventDefault();
+  await guardarPagoInline(formPago);
+});
 
 // --- Ficha de pago descargable (PDF vía diálogo de impresión) -------------
 
@@ -411,13 +906,17 @@ function construirTablaAnualFicha(cliente, honorario, anio) {
 // diálogo de impresión de Electron (desde ahí se puede elegir "Guardar
 // como PDF"). El membrete usa los datos propios del cliente si los tiene
 // cargados (clientes.membrete_*), y si no, el membrete general de
-// configuracion_estudio.
+// configuracion_estudio -- incluyendo el logo (configuracion_estudio.logo_base64)
+// si hay uno cargado; si no hay logo, la ficha se ve igual que siempre.
 function generarFichaPago(cliente, honorario) {
   const anioActual = new Date().getFullYear();
   const nombreEstudio = cliente.membrete_nombre || configuracionEstudio?.nombre_estudio || 'Estudio Contable';
   const direccion = cliente.membrete_direccion || configuracionEstudio?.direccion || '';
   const telefono = cliente.membrete_telefono || configuracionEstudio?.telefono || '';
   const notaVencimiento = configuracionEstudio?.nota_vencimiento || '';
+  const logoHtml = configuracionEstudio?.logo_base64
+    ? `<img src="${configuracionEstudio.logo_base64}" alt="Logo del estudio" class="ficha-logo" />`
+    : '';
 
   let html = `
     <div class="ficha-membrete">
@@ -426,6 +925,7 @@ function generarFichaPago(cliente, honorario) {
         ${direccion ? `<p>${escaparHtmlHonorarios(direccion)}</p>` : ''}
         ${telefono ? `<p>Tel: ${escaparHtmlHonorarios(telefono)}</p>` : ''}
       </div>
+      ${logoHtml}
     </div>
     ${notaVencimiento ? `<p class="ficha-nota-vencimiento">${escaparHtmlHonorarios(notaVencimiento)}</p>` : ''}
     <div class="ficha-cliente-banner">${escaparHtmlHonorarios(cliente.razon_social)}</div>

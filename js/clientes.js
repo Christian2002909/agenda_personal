@@ -33,13 +33,20 @@ const elClienteCierreFiscalMes = document.getElementById('cliente-cierre-fiscal-
 const elClienteObligacionesCheckboxes = document.getElementById('cliente-obligaciones-checkboxes');
 const elClienteHonorarioMensual = document.getElementById('cliente-honorario-mensual');
 const elClienteHonorarioAnual = document.getElementById('cliente-honorario-anual');
-const elClienteMembreteNombre = document.getElementById('cliente-membrete-nombre');
-const elClienteMembreteDireccion = document.getElementById('cliente-membrete-direccion');
-const elClienteMembreteTelefono = document.getElementById('cliente-membrete-telefono');
 
 // Catálogo de obligaciones, para armar los checkboxes.
 let obligacionesCache = [];
 let obligacionesDelClienteEnEdicion = new Set();
+
+// Lista de perfiles (tabla `perfiles`), para armar el <select> de
+// Responsable.
+let perfilesCache = [];
+
+// Si el panel "RG 90 visible" está apagado desde Configuración, no se
+// ofrecen RG90_MENSUAL/RG90_ANUAL como checkboxes de obligaciones acá.
+// Arranca en true para no ocultar nada mientras todavía no se cargó la
+// configuración real.
+let panelRg90Visible = true;
 
 // Se pone en true justo antes de forzar la vista de Clientes desde otra
 // pantalla (ver editarClienteDesdeOtraVista) para que la próxima llamada a
@@ -88,25 +95,59 @@ async function cargarClientes() {
   }
 
   try {
-    const { data, error } = await supabase.from('obligaciones').select('*').order('id');
-    if (error) throw error;
+    const [{ data: obligaciones, error: errorObligaciones }, { data: configuracion, error: errorConfiguracion }] =
+      await Promise.all([
+        supabase.from('obligaciones').select('*').order('id'),
+        supabase.from('configuracion_estudio').select('panel_rg90_visible').eq('id', 1).maybeSingle(),
+      ]);
+    if (errorObligaciones) throw errorObligaciones;
 
-    obligacionesCache = data || [];
-    abrirFormularioNuevo();
+    obligacionesCache = obligaciones || [];
+    // Si falló la lectura de configuración, seguimos mostrando RG 90 (no
+    // ocultamos nada por un error transitorio de una tabla que no es la
+    // esencial de esta pantalla).
+    if (!errorConfiguracion) {
+      panelRg90Visible = configuracion?.panel_rg90_visible ?? true;
+    }
   } catch (error) {
     console.error('Error al cargar el catálogo de obligaciones:', error);
     mostrarMensaje('No se pudo cargar el catálogo de obligaciones.', 'error');
+    return;
+  }
+
+  // La lista de responsables no es indispensable para poder ver el
+  // formulario (si falla, dejamos el select con el fallback correspondiente
+  // en vez de bloquear toda la pantalla).
+  await cargarPerfiles();
+
+  abrirFormularioNuevo();
+}
+
+async function cargarPerfiles() {
+  try {
+    const { data, error } = await supabase.from('perfiles').select('id, nombre').order('nombre');
+    if (error) throw error;
+    perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+  } catch (error) {
+    console.error('Error al cargar la lista de responsables:', error);
+    perfilesCache = [];
   }
 }
 
 // --- Checkboxes de obligaciones por cliente --------------------------------
 
 // Arma un checkbox por cada obligación del catálogo, tildando las que
-// están en "obligacionesSeleccionadas" (un Set de obligacion_id).
+// están en "obligacionesSeleccionadas" (un Set de obligacion_id). Si el
+// panel "RG 90 visible" está apagado, RG90_MENSUAL/RG90_ANUAL no se
+// ofrecen como opción (aunque ya estuvieran tildadas para este cliente).
 function dibujarCheckboxesObligaciones(obligacionesSeleccionadas) {
   elClienteObligacionesCheckboxes.innerHTML = '';
 
-  for (const obligacion of obligacionesCache) {
+  const obligacionesAMostrar = panelRg90Visible
+    ? obligacionesCache
+    : obligacionesCache.filter((o) => o.codigo !== 'RG90_MENSUAL' && o.codigo !== 'RG90_ANUAL');
+
+  for (const obligacion of obligacionesAMostrar) {
     const marcado = obligacionesSeleccionadas.has(obligacion.id);
 
     const etiqueta = document.createElement('label');
@@ -119,6 +160,59 @@ function dibujarCheckboxesObligaciones(obligacionesSeleccionadas) {
   }
 }
 
+// --- <select> de Responsable, poblado desde la tabla `perfiles` -----------
+
+// Arma las opciones del <select> a partir de perfilesCache. Si no hay
+// ningún perfil cargado (tabla vacía o falló la lectura), deja una opción
+// deshabilitada explicando la situación en vez de un <select> vacío mudo.
+function dibujarOpcionesResponsable() {
+  elClienteResponsable.innerHTML = '';
+
+  if (perfilesCache.length === 0) {
+    const opcionVacia = document.createElement('option');
+    opcionVacia.value = '';
+    opcionVacia.textContent = 'No hay responsables cargados';
+    opcionVacia.disabled = true;
+    opcionVacia.selected = true;
+    elClienteResponsable.appendChild(opcionVacia);
+    return;
+  }
+
+  for (const perfil of perfilesCache) {
+    const opcion = document.createElement('option');
+    opcion.value = perfil.id;
+    opcion.textContent = perfil.nombre;
+    elClienteResponsable.appendChild(opcion);
+  }
+}
+
+// Selecciona, dentro de las opciones ya armadas por dibujarOpcionesResponsable,
+// la que corresponde al responsable actual de un cliente que se está
+// editando. Si el texto guardado no coincide con el nombre de ningún perfil
+// existente (responsable de texto libre cargado antes de este cambio, o un
+// perfil que se borró/renombró después), no lo perdemos silenciosamente:
+// se agrega como una opción extra, ya seleccionada.
+function seleccionarResponsable(responsableTexto) {
+  if (!responsableTexto) return;
+
+  const coincidencia = [...elClienteResponsable.options]
+    .find((opcion) => !opcion.disabled && opcion.textContent === responsableTexto);
+
+  if (coincidencia) {
+    elClienteResponsable.value = coincidencia.value;
+    return;
+  }
+
+  const placeholder = elClienteResponsable.querySelector('option[disabled]');
+  if (placeholder) placeholder.remove();
+
+  const opcionActual = document.createElement('option');
+  opcionActual.value = '__actual__';
+  opcionActual.textContent = responsableTexto;
+  opcionActual.selected = true;
+  elClienteResponsable.appendChild(opcionActual);
+}
+
 // --- Mostrar el formulario en modo alta / edición --------------------------
 
 function abrirFormularioNuevo() {
@@ -127,6 +221,10 @@ function abrirFormularioNuevo() {
   elFormTitulo.textContent = 'Nuevo Cliente';
   obligacionesDelClienteEnEdicion = new Set();
   dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
+  // Reconstruye el <select> de Responsable desde cero: si veníamos de
+  // editar un cliente con un responsable "extra" (ver seleccionarResponsable),
+  // esa opción no debe quedar pegada en el formulario de alta.
+  dibujarOpcionesResponsable();
   elClienteRuc.focus();
 }
 
@@ -141,14 +239,13 @@ function abrirFormularioEdicion(cliente, honorario) {
   elClienteRuc.value = cliente.ruc;
   elClienteRazonSocial.value = cliente.razon_social;
   elClienteTerminacionRuc.value = cliente.terminacion_ruc ?? '';
-  elClienteResponsable.value = cliente.responsable;
   elClienteClaveMarangatu.value = cliente.clave_marangatu ?? '';
   elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
   elClienteHonorarioMensual.value = honorario?.monto_mensual ?? '';
   elClienteHonorarioAnual.value = honorario?.monto_anual ?? '';
-  elClienteMembreteNombre.value = cliente.membrete_nombre ?? '';
-  elClienteMembreteDireccion.value = cliente.membrete_direccion ?? '';
-  elClienteMembreteTelefono.value = cliente.membrete_telefono ?? '';
+
+  dibujarOpcionesResponsable();
+  seleccionarResponsable(cliente.responsable);
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
   dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
@@ -179,16 +276,20 @@ elForm.addEventListener('submit', async (evento) => {
     return;
   }
 
+  // El <select> guarda el id del perfil (o un marcador "__actual__" para el
+  // fallback de texto libre) en .value, pero lo que hay que guardar en
+  // clientes.responsable es el NOMBRE visible, no el id -- la columna sigue
+  // siendo texto libre (ver seleccionarResponsable/dibujarOpcionesResponsable).
+  const opcionResponsable = elClienteResponsable.selectedOptions[0];
+  const responsableTexto = opcionResponsable ? opcionResponsable.textContent.trim() : '';
+
   const datosCliente = {
     ruc: elClienteRuc.value.trim(),
     razon_social: elClienteRazonSocial.value.trim(),
     terminacion_ruc: elClienteTerminacionRuc.value === '' ? null : Number(elClienteTerminacionRuc.value),
-    responsable: elClienteResponsable.value.trim(),
+    responsable: responsableTexto,
     clave_marangatu: elClienteClaveMarangatu.value.trim() || null,
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
-    membrete_nombre: elClienteMembreteNombre.value.trim() || null,
-    membrete_direccion: elClienteMembreteDireccion.value.trim() || null,
-    membrete_telefono: elClienteMembreteTelefono.value.trim() || null,
   };
 
   const montoMensual = elClienteHonorarioMensual.value === '' ? null : Number(elClienteHonorarioMensual.value);
@@ -273,6 +374,7 @@ window.editarClienteDesdeOtraVista = async function editarClienteDesdeOtraVista(
   try {
     const [
       { data: obligacionesCatalogo, error: errorObligacionesCatalogo },
+      { data: perfilesCatalogo, error: errorPerfilesCatalogo },
       { data: cliente, error: errorCliente },
       { data: obligacionesDelCliente, error: errorObligacionesDelCliente },
       { data: honorario, error: errorHonorario },
@@ -280,6 +382,9 @@ window.editarClienteDesdeOtraVista = async function editarClienteDesdeOtraVista(
       obligacionesCache.length > 0
         ? Promise.resolve({ data: obligacionesCache, error: null })
         : supabase.from('obligaciones').select('*').order('id'),
+      perfilesCache.length > 0
+        ? Promise.resolve({ data: perfilesCache, error: null })
+        : supabase.from('perfiles').select('id, nombre').order('nombre'),
       supabase.from('clientes').select('*').eq('id', clienteId).single(),
       supabase.from('cliente_obligaciones').select('obligacion_id').eq('cliente_id', clienteId),
       supabase.from('honorarios').select('monto_mensual, monto_anual').eq('cliente_id', clienteId).maybeSingle(),
@@ -291,6 +396,14 @@ window.editarClienteDesdeOtraVista = async function editarClienteDesdeOtraVista(
     if (errorHonorario) throw errorHonorario;
 
     obligacionesCache = obligacionesCatalogo || [];
+    // La lista de responsables no es crítica: si falló, seguimos con lo que
+    // ya hubiera en caché (posiblemente vacío) en vez de frenar la edición
+    // del cliente por completo.
+    if (!errorPerfilesCatalogo) {
+      perfilesCache = (perfilesCatalogo || []).filter((perfil) => perfil.nombre);
+    } else {
+      console.error('Error al cargar la lista de responsables:', errorPerfilesCatalogo);
+    }
     obligacionesDelClienteEnEdicion = new Set((obligacionesDelCliente || []).map((fila) => fila.obligacion_id));
 
     ignorarProximaCarga = true;

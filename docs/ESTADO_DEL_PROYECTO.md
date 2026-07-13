@@ -16,13 +16,13 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 
 | Fase | Pantalla | Qué hace |
 |---|---|---|
-| 1 | Presentaciones | **Pantalla principal (se abre primero al entrar)**. Filtro por Obligación (arranca en IVA), clientes agrupados por "VENCIMIENTO N - FECHA D" según terminación de RUC — igual que la planilla de control en Excel que usaba el estudio. Checkbox de presentado con fecha automática, y un link en cada cliente para editarlo (abre la pestaña Clientes) |
-| 2 | Clientes | Ahora es **solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano) y qué obligaciones le corresponden (checkboxes). Ya no tiene "Tipo de Contribuyente" (se sacó de la app y de la base, quedó redundante) |
-| 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones para calcular vencimientos |
-| 4 | Calendario | Solo muestra lo que **vence EN EL MES EN CURSO** (no todo el período vigente) y todavía no se presentó. En **enero** aparece además una sección aparte con las obligaciones anuales que recién entraron en ejercicio nuevo (aviso adelantado, aunque su vencimiento real sea marzo/abril). Se actualiza solo, nunca hay que recrearlo a mano |
-| 5 | Historial | Filtro por Obligación (igual que Presentaciones), agrupado por vencimiento. Para IVA (mensual): grilla del año completo mes por mes con la fecha exacta de vencimiento, verde/rojo/gris. Para las anuales: una fila por año (actual y anterior) con fecha exacta y estado |
-| 6 | Honorarios | Cuota mensual y/o anual por cliente (independientes, se configuran en Clientes), búsqueda por nombre/RUC, registro de pagos con forma de pago (efectivo/transferencia/cheque) y número de recibo, estado "Al día"/"Debe" con deuda acumulada, y ficha de pago descargable en PDF por cliente |
-| 7 | Configuración | Tema claro/oscuro (localStorage, por computadora) y membrete general del estudio para la ficha de pago (Supabase, compartido) |
+| 1 | Presentaciones | **Pantalla principal (se abre primero al entrar)**. Filtro por Obligación (arranca en IVA, incluye RG 90 Mensual/Anual), clientes agrupados por "VENCIMIENTO N - FECHA D" según terminación de RUC — igual que la planilla de control en Excel que usaba el estudio. Checkbox de presentado (sin columna de fecha, se sacó por pedido del usuario), y un link en cada cliente para editarlo (abre la pestaña Clientes) |
+| 2 | Clientes | **Solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano), campo **Responsable como lista desplegable** (se elige de los usuarios reales del sistema, tabla `perfiles`, ya no es texto libre), y qué obligaciones le corresponden (checkboxes, incluye RG 90 Mensual/Anual). Ya no tiene "Tipo de Contribuyente" ni la sección de membrete por cliente (el membrete quedó único y centralizado en Configuración) |
+| 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU, RG 90 Mensual, RG 90 Anual). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones/Historial para calcular vencimientos |
+| 4 | Calendario | Solo muestra lo que **vence EN EL MES EN CURSO** (no todo el período vigente) y todavía no se presentó, con la columna "Obligación" de vuelta. En **enero** aparece además una sección aparte con las obligaciones anuales que recién entraron en ejercicio nuevo (aviso adelantado, aunque su vencimiento real sea marzo/abril). Ambas cosas (la columna y la sección de enero) se pueden ocultar desde Configuración → Paneles. Se actualiza solo, nunca hay que recrearlo a mano |
+| 5 | Historial | Filtro por Obligación + **selector de año** (2022 en adelante), agrupado por vencimiento, grilla compacta con scroll horizontal solo si hace falta. Para obligaciones mensuales: 12 columnas del año elegido con la fecha exacta de vencimiento, verde/rojo/gris — **cada celda es editable**, tocarla marca/desmarca "presentado" para ese período aunque ya haya pasado, sin necesidad de pasar por Presentaciones/Calendario. Para las anuales: una fila por cliente del ejercicio elegido, con la misma lógica |
+| 6 | Honorarios | Cuota mensual y/o anual por cliente (independientes, se configuran en Clientes o editables directo desde acá), búsqueda por nombre/RUC, sección aparte para la cuota anual (visible solo desde febrero), registro de pago como fila desplegable por cliente (no un formulario fijo), edición de pagos ya cargados, vista de detalle de pagos por cliente y por período, estado "Al día"/"Debe" con deuda acumulada, y ficha de pago descargable en PDF (con logo del estudio si está cargado) |
+| 7 | Configuración | Organizada en pestañas: **Tema** (claro/oscuro, localStorage), **Membrete** (nombre/dirección/teléfono/nota/logo del estudio, único para todos los clientes, Supabase compartido) y **Paneles** (mostrar/ocultar secciones opcionales del sistema: aviso de enero en Calendario, columna Obligación en Calendario, visibilidad de RG 90, cuota anual de Honorarios) |
 
 ## Cómo levantar el proyecto en una PC nueva
 
@@ -109,23 +109,49 @@ Antes el Calendario mostraba todo el período vigente no presentado (podía incl
 - **Lista principal**: solo lo que vence dentro del mes calendario actual (compara año y mes de `fecha_vencimiento` contra hoy).
 - **"Obligaciones Anuales — Nuevo Ejercicio"** (`#seccion-anuales-nuevo-ejercicio`): sección aparte que solo aparece en **enero**, con las obligaciones anuales cuyo período vigente ya cambió de ejercicio aunque su vencimiento real (marzo/abril) todavía esté lejos — sirve de aviso temprano. El resto del año esta sección queda oculta.
 
-## Honorarios: cuota mensual y/o anual, ficha de pago en PDF
+## Honorarios: cuota mensual y/o anual, pago como fila desplegable, ficha de pago en PDF
 
-Rediseño completo pedido comparando con el Excel real del estudio ("Control de Honorarios").
+Rediseño completo pedido comparando con el Excel real del estudio ("Control de Honorarios"), en dos tandas.
 
-- **Cuota independiente mensual y anual** (`honorarios.monto_mensual` / `monto_anual`, ambas nullable, al menos una obligatoria): un cliente puede tener las dos a la vez (ej. IVA con IRE: mensualidad + cuota anual), solo una, o la otra. Se configuran **desde la pantalla de Clientes** (no hay flujo aparte de "Configurar honorario"), en la sección "Honorarios" del formulario de alta/edición.
-- **`js/honorarios.js`** ahora tiene una barra de búsqueda (por nombre o RUC) sobre la tabla principal, que muestra Cliente / Cuota Mensual / Cuota Anual / Estado / botón "Ficha". El estado "Al día"/"Debe" suma el saldo de cada cuota por separado (`calcularSaldoPorTipo`): cada una acumula deuda desde `honorarios.created_at` según su propia periodicidad, y se resta lo pagado de ese mismo tipo (`pagos_honorarios.tipo_honorario`).
-- **Registrar pago** ahora pide a qué cuota corresponde (mensual/anual), la **forma de pago** (efectivo/transferencia/cheque) y el **número de recibo**, además de monto/fecha/período (se sugieren automáticamente al elegir cliente y tipo).
-- **Ficha de pago descargable en PDF**: botón "Ficha" por cliente arma el HTML de la ficha (tabla mes a mes para la cuota mensual con Balance Anual, y/o tabla de la cuota anual) en un `<div id="ficha-pago-imprimir">` oculto, y llama a `window.print()` — no hay IPC ni ventana nueva de Electron; el `@media print` de `css/style.css` oculta todo lo demás y el usuario elige "Guardar como PDF" en el diálogo nativo de impresión.
-- **Membrete de la ficha** (nombre del estudio, dirección, teléfono, nota de vencimiento): tiene un valor **general** configurable en Configuración → "Membrete General" (tabla `configuracion_estudio`, fila única), pero cada cliente puede **sobreescribirlo individualmente** (`clientes.membrete_nombre/direccion/telefono`, opcionales) para el caso de un cliente que factura con otro logo/estudio. La precedencia es: dato propio del cliente si está cargado, si no el general.
+- **Cuota independiente mensual y anual** (`honorarios.monto_mensual` / `monto_anual`, ambas nullable, al menos una obligatoria): un cliente puede tener las dos a la vez (ej. IVA con IRE: mensualidad + cuota anual), solo una, o la otra. Se configuran desde la pantalla de Clientes, o directo desde Honorarios con el botón "Editar cuota" de cada fila (hace `upsert` sobre `honorarios`, sirve también para configurar el honorario de un cliente que todavía no tenía uno).
+- **`js/honorarios.js`** tiene una barra de búsqueda (por nombre o RUC) sobre la tabla principal, que muestra Cliente / Cuota Mensual / Cuota Anual / Estado. El estado "Al día"/"Debe" suma el saldo de cada cuota por separado (`calcularSaldoPorTipo`): cada una acumula deuda desde `honorarios.created_at` según su propia periodicidad, y se resta lo pagado de ese mismo tipo (`pagos_honorarios.tipo_honorario`). La cuota **anual** tiene una regla extra: en enero todavía no cuenta como adeudada (recién empieza a sumar desde febrero), y tiene su propia sección aparte en la pantalla (visible solo desde febrero, y solo si el panel `panel_honorarios_cuota_anual` de Configuración está activado).
+- **Registrar un pago ya no es un formulario fijo**: cada cliente tiene una casilla "¿Pagó?" en su fila que, al tildarla, despliega un mini-formulario en el momento (mismo patrón que el checkbox de Presentado en Presentaciones/Calendario) pidiendo a qué cuota corresponde (si tiene las dos), monto, **forma de pago** (efectivo/transferencia/cheque), **número de recibo** (opcional) y el período (mes+año para mensual, año para anual — ya no es una fecha suelta). La fecha de pago sugiere el día de hoy por defecto, editable.
+- **Pagos editables**: cada pago ya cargado tiene un botón "Editar" que reabre el mismo mini-formulario con los datos precargados para corregir monto/fecha/forma de pago/recibo. Hay también una vista de detalle por cliente (todo su historial de pagos junto) y un filtro por período sobre la tabla de pagos, para ubicar y corregir pagos atrasados.
+- **Ficha de pago descargable en PDF**: botón "Ficha" por cliente arma el HTML de la ficha (tabla mes a mes para la cuota mensual con Balance Anual, y/o tabla de la cuota anual, más el **logo del estudio** si está cargado en Configuración) en un `<div id="ficha-pago-imprimir">` oculto, y llama a `window.print()` — no hay IPC ni ventana nueva de Electron; el `@media print` de `css/style.css` oculta todo lo demás y el usuario elige "Guardar como PDF" en el diálogo nativo de impresión.
+- **Membrete de la ficha** (nombre del estudio, dirección, teléfono, nota de vencimiento, logo): un solo valor, **único para todos los clientes**, configurado en Configuración → pestaña "Membrete" (tabla `configuracion_estudio`, fila única). Ya no existe override por cliente — se sacó esa sección del formulario de Clientes (las columnas `clientes.membrete_*` siguen en la base sin usarse, no se borraron).
 
-## Historial: filtro por Obligación + grilla mensual con fecha exacta
+## Historial: filtro por Obligación + selector de año + grilla editable
 
-Antes era una lista cronológica simple de solo lo YA presentado. Ahora (`js/historial.js`) tiene el mismo filtro por Obligación que Presentaciones (arranca en IVA) y agrupa por vencimiento igual que el Excel, pero muestra TODOS los períodos, se hayan presentado o no:
+Antes era una lista cronológica simple de solo lo YA presentado. Ahora (`js/historial.js`) tiene el mismo filtro por Obligación que Presentaciones (arranca en IVA, incluye RG 90) y agrupa por vencimiento igual que el Excel, pero muestra TODOS los períodos, se hayan presentado o no, para el año elegido en un **selector de año** (2022 hasta el actual, uno a la vez):
 
-- **Obligaciones mensuales (IVA)**: una fila por cliente con 12 columnas (Ene-Dic) del año actual. Cada celda calcula la fecha exacta de vencimiento con `calcularFechaVencimiento()` (la misma función pura que usa Calendario, no depende de que exista un registro en la base) y se colorea: verde si está presentado, rojo si ya venció y no se presentó, gris si todavía no llega la fecha.
-- **Obligaciones anuales**: una fila por cliente por ejercicio (año actual y el anterior), con la misma lógica de colores, más una columna de texto ("Presentado el...", "No presentado", "Todavía no vence").
+- **Obligaciones mensuales (IVA, etc.)**: una fila por cliente con 12 columnas (Ene-Dic) del año elegido. Cada celda calcula la fecha exacta de vencimiento con `calcularFechaVencimiento()` (la misma función pura que usa Calendario, no depende de que exista un registro en la base) y se colorea: verde si está presentado, rojo si ya venció y no se presentó, gris si todavía no llega la fecha.
+- **Obligaciones anuales**: una fila por cliente para el ejercicio elegido, con la misma lógica de colores.
+- **Cada celda es editable**: un click tilda/destilda "presentado" para ese período — hace `upsert` sobre `presentaciones` (`onConflict: cliente_id,obligacion_id,periodo`), así que funciona igual si la fila ya existía (períodos recientes) o si hay que crearla de cero (períodos viejos, que nunca se autogeneran salvo el vigente). La fecha de presentación se pone automática (hoy), no hay selector de fecha retroactiva.
 - El nombre del cliente también es un link que abre Clientes para editarlo, igual que en Presentaciones.
+- Grilla envuelta en `.tabla-scroll` (mismo contenedor que usa Honorarios) con columnas angostas y fechas cortas ("dd/mm") para que entren los 12 meses sin desbordar.
+
+## RG 90 (Registro de Comprobantes, Marangatu)
+
+Nueva obligación agregada al catálogo, con dos variantes independientes (un cliente puede tener una, la otra, o ninguna, tildadas en Clientes igual que el resto):
+
+- **RG 90 Mensual** (`RG90_MENSUAL`): mismo vencimiento que IVA (mismo día por terminación de RUC, mismo mes).
+- **RG 90 Anual** (`RG90_ANUAL`): vence el segundo mes posterior al cierre fiscal (ej. cierre diciembre → vence febrero), con el día calculado con la misma tabla de terminación de RUC que el resto — esto último es una asunción (las fuentes oficiales no publican una tabla propia por RUC para esta obligación puntual, solo dicen que sigue "el calendario de vencimientos de las declaraciones juradas informativas"), a ajustar si en la práctica con Marangatu no coincide.
+- Aparece en Calendario, Presentaciones e Historial igual que cualquier otra obligación. Se puede ocultar de los filtros y checkboxes desde Configuración → Paneles (`panel_rg90_visible`), para estudios que no la necesiten.
+
+## Responsable por cliente: ahora es una lista de usuarios reales
+
+El campo "Responsable" del formulario de Clientes pasó de texto libre a un `<select>` poblado con los usuarios reales del sistema (tabla `perfiles`, columna `nombre`). Para que esto funcione, se tuvo que abrir la policy de lectura de `perfiles` (antes cada usuario solo podía leer su propio perfil, `using (id = auth.uid())`) a `using (true)` para cualquier autenticado — sigue sin exponerse a `anon`. Se sigue guardando como texto libre en `clientes.responsable` (el nombre elegido, no el uuid), así que no rompe nada de lo que ya lee ese campo. Es solo un cambio de cómo se carga el dato — todavía NO filtra ni restringe qué clientes ve cada usuario (eso quedó pausado, ver más abajo).
+
+## Paneles: mostrar/ocultar secciones opcionales desde Configuración
+
+Nueva pestaña "Paneles" en Configuración, con 4 switches guardados en `configuracion_estudio` (todos `true` por defecto, para no cambiar el comportamiento de nadie hasta que se apague alguno a mano):
+
+- `panel_calendario_nuevo_ejercicio`: sección de enero en Calendario.
+- `panel_calendario_columna_obligacion`: columna "Obligación" en Calendario.
+- `panel_rg90_visible`: si RG 90 aparece en filtros/checkboxes.
+- `panel_honorarios_cuota_anual`: si se muestra la sección de cuota anual en Honorarios.
+
+Pensado para crecer más adelante con más opciones a medida que se necesiten — esta primera versión cubre solo estas 4.
 
 ## Tema claro/oscuro
 
@@ -133,7 +159,11 @@ Antes era una lista cronológica simple de solo lo YA presentado. Ahora (`js/his
 
 ## Login (Supabase Auth)
 
-La app pide email/contraseña al arrancar (`js/auth.js`, sección `#vista-login` de `index.html`). No hay pantalla de alta de usuarios: se crean a mano en el dashboard de Supabase (Authentication → Users). Mientras no haya sesión válida, RLS rechaza cualquier consulta a la base (la seguridad real está en `schema.sql`, no en el frontend).
+La app pide email/contraseña al arrancar (`js/auth.js`, sección `#vista-login` de `index.html`). No hay pantalla de alta de usuarios: se crean a mano en el dashboard de Supabase (Authentication → Users). Mientras no haya sesión válida, RLS rechaza cualquier consulta a la base (la seguridad real está en `schema.sql`, no en el frontend). Los campos de email/contraseña tienen `autocomplete="username"`/`autocomplete="current-password"`, así que el navegador/Electron los recuerda solo. Hay un link "¿Olvidaste tu contraseña?" que dispara `supabase.auth.resetPasswordForEmail()`.
+
+## Bug corregido: cartel de error "pegado" tras el login
+
+Cada pantalla intenta cargar sus datos apenas arranca la app, antes de terminar de loguearse (a propósito: `#app-autenticado` está oculto en ese momento, así que no se nota). Ese primer intento fallaba por falta de sesión y mostraba un cartel rojo de error — pero el código nunca lo volvía a ocultar cuando la carga real, después del login, salía bien. Se corrigió en Presentaciones, Calendario e Historial (ocultan el cartel en el punto de éxito de su función de carga); Honorarios y Configuración ya no tenían el bug porque su mensaje se autooculta solo con un `setTimeout`.
 
 ## Honorarios: cómo se calcula "Al día" / "Debe"
 
@@ -145,6 +175,8 @@ Acumula TODA la deuda desde que se configuró el honorario de ese cliente (`hono
 2. Posición del menú de navegación configurable (izquierda/arriba/abajo/derecha) — pedido por el usuario pero marcado como secundario, se hace después de lo demás.
 3. Si más adelante se necesita distinguir permisos por rol (admin vs responsable), usar la columna `perfiles.rol` para escribir policies más finas (hoy cualquier autenticado tiene acceso total — ver sección 5/14 de `schema.sql`).
 4. Evaluar agregar un flujo de invitación/alta de usuarios desde la propia app (hoy se crean a mano en el dashboard de Supabase).
+5. Corrector ortográfico (`spellcheck="true"`) y formato de miles con punto ya están aplicados en los campos de texto y montos, respectivamente — sin pendientes ahí.
+6. Cualquier tema de acceso/visibilidad por usuario (más allá de que el campo Responsable ahora se elija de una lista) queda fuera de este documento por ahora — se retoma directamente con el usuario cuando corresponda.
 
 > Nota: la Fase 4 (Presentaciones) no tenía ningún problema real — el comentario anterior sobre "revisar Fase 4" fue una falsa alarma, confirmada con el usuario.
 

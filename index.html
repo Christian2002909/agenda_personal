@@ -33,6 +33,9 @@
         <div class="acciones-form">
           <button type="submit" class="boton boton-primario">Ingresar</button>
         </div>
+        <div class="acciones-form">
+          <button type="button" id="btn-olvide-contrasena" class="boton-link">¿Olvidaste tu contraseña?</button>
+        </div>
       </form>
     </div>
   </section>
@@ -77,12 +80,12 @@
 
           <div class="fila-form">
             <label for="cliente-ruc">RUC</label>
-            <input type="text" id="cliente-ruc" placeholder="Ej: 80012345-6" required />
+            <input type="text" id="cliente-ruc" placeholder="Ej: 80012345-6" spellcheck="true" required />
           </div>
 
           <div class="fila-form">
             <label for="cliente-razon-social">Razón Social / Nombre</label>
-            <input type="text" id="cliente-razon-social" required />
+            <input type="text" id="cliente-razon-social" spellcheck="true" required />
           </div>
 
           <div class="fila-form">
@@ -93,12 +96,14 @@
 
           <div class="fila-form">
             <label for="cliente-responsable">Responsable</label>
-            <input type="text" id="cliente-responsable" placeholder="Ej: Christian" required />
+            <select id="cliente-responsable" required>
+              <!-- Las opciones se arman dinámicamente desde js/clientes.js, una por cada perfil de la tabla `perfiles` -->
+            </select>
           </div>
 
           <div class="fila-form">
             <label for="cliente-clave-marangatu">Clave Marangatu</label>
-            <input type="text" id="cliente-clave-marangatu" placeholder="Clave de acceso al SET" />
+            <input type="text" id="cliente-clave-marangatu" placeholder="Clave de acceso al SET" spellcheck="true" />
           </div>
 
           <div class="fila-form">
@@ -120,7 +125,6 @@
           </div>
 
           <h3 class="subtitulo-form">Honorarios</h3>
-          <p class="texto-ayuda">Un cliente puede tener cuota mensual, anual, o ambas. Dejá vacío lo que no corresponda.</p>
 
           <div class="fila-form">
             <label for="cliente-honorario-mensual">Cuota Mensual (Gs.)</label>
@@ -130,24 +134,6 @@
           <div class="fila-form">
             <label for="cliente-honorario-anual">Cuota Anual (Gs.)</label>
             <input type="number" id="cliente-honorario-anual" min="1" step="1" placeholder="Ej: 150000" />
-          </div>
-
-          <h3 class="subtitulo-form">Membrete para la ficha de pago (opcional)</h3>
-          <p class="texto-ayuda">Si se deja vacío, la ficha de pago de este cliente usa el membrete general (Configuración).</p>
-
-          <div class="fila-form">
-            <label for="cliente-membrete-nombre">Nombre del estudio/oficina</label>
-            <input type="text" id="cliente-membrete-nombre" placeholder="Se usa el general si se deja vacío" />
-          </div>
-
-          <div class="fila-form">
-            <label for="cliente-membrete-direccion">Dirección</label>
-            <input type="text" id="cliente-membrete-direccion" />
-          </div>
-
-          <div class="fila-form">
-            <label for="cliente-membrete-telefono">Teléfono</label>
-            <input type="text" id="cliente-membrete-telefono" />
           </div>
 
           <div class="acciones-form">
@@ -165,19 +151,12 @@
     <section id="vista-calendario" class="vista oculto">
       <section class="tarjeta">
         <h2>Calendario de Vencimientos</h2>
-        <p class="texto-ayuda">
-          Se genera y actualiza solo: no hace falta recrearlo cada mes ni
-          cada año. Solo muestra lo que VENCE ESTE MES y todavía NO se
-          presentó (una vez presentado, o al pasar el mes, desaparece de
-          acá y queda en Historial). La obligación IDU no aparece acá
-          porque se carga a mano solo cuando corresponde (distribución de
-          dividendos).
-        </p>
         <div id="calendario-mensaje" class="mensaje mensaje-error oculto"></div>
         <table class="tabla-clientes">
           <thead>
             <tr>
               <th>Cliente</th>
+              <th id="calendario-th-obligacion">Obligación</th>
               <th>Período</th>
               <th>Vencimiento</th>
             </tr>
@@ -196,11 +175,6 @@
            puede ser recién en marzo/abril). -->
       <section id="seccion-anuales-nuevo-ejercicio" class="tarjeta oculto">
         <h2>Obligaciones Anuales — Nuevo Ejercicio</h2>
-        <p class="texto-ayuda">
-          El ejercicio fiscal que cerró en diciembre ya está vigente para
-          estas obligaciones anuales, aunque su vencimiento real todavía
-          no llegue.
-        </p>
         <table class="tabla-clientes">
           <thead>
             <tr>
@@ -222,12 +196,6 @@
     <section id="vista-presentaciones" class="vista">
       <section class="tarjeta">
         <h2>Presentaciones del Período Vigente</h2>
-        <p class="texto-ayuda">
-          Agrupado por vencimiento (terminación de RUC), igual que la planilla
-          de control. Tildá "Presentado" cuando ya se presentó. Al cambiar de
-          mes o año, la lista se actualiza sola para el período nuevo — lo
-          viejo queda guardado en Historial.
-        </p>
         <div class="fila-form">
           <label for="presentaciones-filtro-obligacion">Obligación</label>
           <select id="presentaciones-filtro-obligacion">
@@ -250,18 +218,19 @@
     <section id="vista-historial" class="vista oculto">
       <section class="tarjeta">
         <h2>Historial de Presentaciones</h2>
-        <p class="texto-ayuda">
-          Agrupado por vencimiento, igual que Presentaciones. Para
-          obligaciones mensuales (IVA) se ve el año completo mes por mes,
-          con la fecha exacta de vencimiento de cada uno; verde si se
-          presentó, rojo si ya venció y no se presentó, gris si todavía no
-          llega la fecha. Para las anuales se ve el año actual y el anterior.
-        </p>
-        <div class="fila-form">
-          <label for="historial-filtro-obligacion">Obligación</label>
-          <select id="historial-filtro-obligacion">
-            <!-- Las opciones se arman dinámicamente desde js/historial.js, una por obligación del catálogo -->
-          </select>
+        <div class="fila-form-filtros-pagos">
+          <div class="fila-form">
+            <label for="historial-filtro-obligacion">Obligación</label>
+            <select id="historial-filtro-obligacion">
+              <!-- Las opciones se arman dinámicamente desde js/historial.js, una por obligación del catálogo -->
+            </select>
+          </div>
+          <div class="fila-form">
+            <label for="historial-filtro-anio">Año</label>
+            <select id="historial-filtro-anio">
+              <!-- Se arma dinámicamente desde js/historial.js: desde 2022 hasta el año actual -->
+            </select>
+          </div>
         </div>
         <div id="historial-mensaje" class="mensaje mensaje-error oculto"></div>
         <div id="historial-grupos">
@@ -278,16 +247,13 @@
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
 
-      <!-- Honorario pactado por cliente -->
+      <!-- Honorario pactado por cliente. Registrar un pago, editar la cuota
+           pactada y ver el detalle de un cliente se hacen todos desde acá,
+           expandiendo una fila-formulario debajo de la fila del cliente
+           (misma idea que el checkbox "Presentado" de Presentaciones, pero
+           en vez de guardar al toque, despliega un mini-formulario). -->
       <section class="tarjeta">
         <h2>Honorarios por Cliente</h2>
-        <p class="texto-ayuda">
-          La cuota mensual y anual se configuran desde la pantalla de
-          Clientes. "Al día" / "Debe" acumula toda la deuda desde que se
-          configuró el honorario, comparando el total pactado (todos los
-          períodos) contra todos los pagos registrados, mensual y anual por
-          separado.
-        </p>
         <div class="fila-form">
           <label for="honorarios-buscar">Buscar cliente</label>
           <input type="search" id="honorarios-buscar" placeholder="Nombre o RUC..." />
@@ -300,7 +266,8 @@
                 <th>Cuota Mensual</th>
                 <th>Cuota Anual</th>
                 <th>Estado</th>
-                <th></th>
+                <th>¿Pagó?</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tabla-honorarios-body">
@@ -311,64 +278,58 @@
         <p id="sin-honorarios" class="sin-datos oculto">No hay clientes que coincidan con la búsqueda.</p>
       </section>
 
-      <!-- Registrar un pago -->
-      <section class="tarjeta">
-        <h2>Registrar Pago</h2>
-        <form id="form-pago">
-          <div class="fila-form">
-            <label for="pago-cliente">Cliente</label>
-            <select id="pago-cliente" required>
-              <option value="">Seleccioná un cliente</option>
-            </select>
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-tipo">Corresponde a</label>
-            <select id="pago-tipo" required>
-              <option value="mensual">Cuota Mensual</option>
-              <option value="anual">Cuota Anual</option>
-            </select>
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-monto">Monto Pagado (Gs.)</label>
-            <input type="number" id="pago-monto" min="1" step="1" required />
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-forma">Forma de Pago</label>
-            <select id="pago-forma" required>
-              <option value="efectivo">Efectivo</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="cheque">Cheque</option>
-            </select>
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-recibo">N° de Recibo</label>
-            <input type="text" id="pago-recibo" placeholder="Ej: 0231" />
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-fecha">Fecha de Pago</label>
-            <input type="date" id="pago-fecha" />
-          </div>
-
-          <div class="fila-form">
-            <label for="pago-periodo">Corresponde al período (cualquier fecha del mes/año correspondiente)</label>
-            <input type="date" id="pago-periodo" />
-            <small>Se sugiere solo al elegir el cliente. Cambiala si el pago es de un período anterior.</small>
-          </div>
-
-          <div class="acciones-form">
-            <button type="submit" class="boton boton-primario">Registrar Pago</button>
-          </div>
-        </form>
+      <!-- Cuota Anual: sección aparte, solo visible desde febrero (mismo mes
+           en que la cuota anual empieza a contar como "Debe") y solo si el
+           panel "panel_honorarios_cuota_anual" de Configuración > Paneles
+           está activado. js/honorarios.js la oculta el resto del año o si
+           el panel está apagado. -->
+      <section class="tarjeta oculto" id="seccion-honorarios-anual">
+        <h2>Cuota Anual</h2>
+        <div class="tabla-scroll">
+          <table class="tabla-clientes">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Cuota Anual</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="tabla-honorarios-anual-body">
+              <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- Historial de pagos -->
       <section class="tarjeta">
         <h2>Historial de Pagos</h2>
+        <div class="fila-form-filtros-pagos">
+          <div class="fila-form">
+            <label for="pagos-filtro-anio">Año</label>
+            <select id="pagos-filtro-anio">
+              <option value="">Todos</option>
+            </select>
+          </div>
+          <div class="fila-form">
+            <label for="pagos-filtro-mes">Mes (cuota mensual)</label>
+            <select id="pagos-filtro-mes">
+              <option value="">Todos</option>
+              <option value="1">Enero</option>
+              <option value="2">Febrero</option>
+              <option value="3">Marzo</option>
+              <option value="4">Abril</option>
+              <option value="5">Mayo</option>
+              <option value="6">Junio</option>
+              <option value="7">Julio</option>
+              <option value="8">Agosto</option>
+              <option value="9">Setiembre</option>
+              <option value="10">Octubre</option>
+              <option value="11">Noviembre</option>
+              <option value="12">Diciembre</option>
+            </select>
+          </div>
+        </div>
         <div class="tabla-scroll">
           <table class="tabla-clientes">
             <thead>
@@ -380,6 +341,7 @@
                 <th>N° Recibo</th>
                 <th>Fecha de Pago</th>
                 <th>Período</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tabla-pagos-body">
@@ -396,55 +358,102 @@
     <!-- VISTA: Configuración           -->
     <!-- ============================== -->
     <section id="vista-configuracion" class="vista oculto">
-      <section class="tarjeta">
-        <h2>Configuración</h2>
-        <div class="fila-form">
-          <label>Tema</label>
-          <div class="grupo-radio">
-            <label class="opcion-radio">
-              <input type="radio" name="tema" id="tema-claro" value="claro" />
-              Claro
-            </label>
-            <label class="opcion-radio">
-              <input type="radio" name="tema" id="tema-oscuro" value="oscuro" />
-              Oscuro
-            </label>
-          </div>
-          <small>Se guarda en esta computadora; cada persona puede elegir el suyo.</small>
-        </div>
-      </section>
 
-      <section class="tarjeta">
-        <h2>Membrete General (Ficha de Pago)</h2>
-        <p class="texto-ayuda">
-          Se usa en la ficha de pago descargable de todos los clientes que
-          no tengan su propio membrete configurado (ver formulario de
-          Clientes). Se guarda en Supabase, así que es el mismo para todos
-          los que usan la app.
-        </p>
-        <div id="configuracion-estudio-mensaje" class="mensaje oculto"></div>
-        <form id="form-configuracion-estudio">
+      <!-- Sub-navegación interna de Configuración: mismo patrón visual que
+           el menú principal (nav-boton/activo), un nivel adentro. Se
+           muestra/oculta con JS simple en js/configuracion.js, sin usar
+           mostrarVista (eso es solo para vistas completas). -->
+      <div class="config-tabs">
+        <button type="button" class="config-tab-boton activo" data-config-tab="config-tab-tema">Tema</button>
+        <button type="button" class="config-tab-boton" data-config-tab="config-tab-membrete">Membrete</button>
+        <button type="button" class="config-tab-boton" data-config-tab="config-tab-paneles">Paneles</button>
+      </div>
+
+      <div id="config-tab-tema" class="config-tab-panel">
+        <section class="tarjeta">
+          <h2>Configuración</h2>
           <div class="fila-form">
-            <label for="config-nombre-estudio">Nombre del Estudio</label>
-            <input type="text" id="config-nombre-estudio" placeholder="Ej: Estudio Contable BZ" />
+            <label>Tema</label>
+            <div class="grupo-radio">
+              <label class="opcion-radio">
+                <input type="radio" name="tema" id="tema-claro" value="claro" />
+                Claro
+              </label>
+              <label class="opcion-radio">
+                <input type="radio" name="tema" id="tema-oscuro" value="oscuro" />
+                Oscuro
+              </label>
+            </div>
+            <small>Se guarda en esta computadora; cada persona puede elegir el suyo.</small>
+          </div>
+        </section>
+      </div>
+
+      <div id="config-tab-membrete" class="config-tab-panel oculto">
+        <section class="tarjeta">
+          <h2>Membrete General (Ficha de Pago)</h2>
+          <div id="configuracion-estudio-mensaje" class="mensaje oculto"></div>
+          <form id="form-configuracion-estudio">
+            <div class="fila-form">
+              <label for="config-nombre-estudio">Nombre del Estudio</label>
+              <input type="text" id="config-nombre-estudio" placeholder="Ej: Estudio Contable BZ" spellcheck="true" />
+            </div>
+            <div class="fila-form">
+              <label for="config-direccion">Dirección</label>
+              <input type="text" id="config-direccion" spellcheck="true" />
+            </div>
+            <div class="fila-form">
+              <label for="config-telefono">Teléfono</label>
+              <input type="text" id="config-telefono" spellcheck="true" />
+            </div>
+            <div class="fila-form">
+              <label for="config-nota-vencimiento">Nota de Vencimiento</label>
+              <input type="text" id="config-nota-vencimiento" placeholder="Ej: Vencimiento: 1 al 10 de cada mes" spellcheck="true" />
+            </div>
+            <div class="fila-form">
+              <label for="config-logo">Logo del Estudio</label>
+              <input type="file" id="config-logo" accept="image/*" />
+              <img id="config-logo-preview" class="logo-preview oculto" alt="Logo actual del estudio" />
+            </div>
+            <div class="acciones-form">
+              <button type="submit" class="boton boton-primario">Guardar Membrete</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div id="config-tab-paneles" class="config-tab-panel oculto">
+        <section class="tarjeta">
+          <h2>Paneles</h2>
+          <div id="configuracion-paneles-mensaje" class="mensaje oculto"></div>
+          <div class="fila-form">
+            <label class="opcion-checkbox">
+              <input type="checkbox" id="panel-calendario-nuevo-ejercicio" />
+              Mostrar aviso de obligaciones anuales en enero (Calendario)
+            </label>
           </div>
           <div class="fila-form">
-            <label for="config-direccion">Dirección</label>
-            <input type="text" id="config-direccion" />
+            <label class="opcion-checkbox">
+              <input type="checkbox" id="panel-calendario-columna-obligacion" />
+              Mostrar la columna "Obligación" en la tabla de Calendario
+            </label>
           </div>
           <div class="fila-form">
-            <label for="config-telefono">Teléfono</label>
-            <input type="text" id="config-telefono" />
+            <label class="opcion-checkbox">
+              <input type="checkbox" id="panel-rg90-visible" />
+              Mostrar RG 90 (Mensual y Anual) en los filtros y en los checkboxes de Clientes
+            </label>
           </div>
           <div class="fila-form">
-            <label for="config-nota-vencimiento">Nota de Vencimiento</label>
-            <input type="text" id="config-nota-vencimiento" placeholder="Ej: Vencimiento: 1 al 10 de cada mes" />
+            <label class="opcion-checkbox">
+              <input type="checkbox" id="panel-honorarios-cuota-anual" />
+              Mostrar la sección de cuota anual en Honorarios
+            </label>
+            <small>La sección solo aparece desde febrero, además de requerir este switch activado (ver js/honorarios.js).</small>
           </div>
-          <div class="acciones-form">
-            <button type="submit" class="boton boton-primario">Guardar Membrete</button>
-          </div>
-        </form>
-      </section>
+        </section>
+      </div>
+
     </section>
 
   </main>

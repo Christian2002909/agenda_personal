@@ -13,6 +13,10 @@
 //   - IRE SIMPLE, IRP-RSP e IRP-RGC vencen en marzo del año siguiente al
 //     cierre fiscal (Formularios 141/515/516 en Sistema Marangatu).
 //   - IRE GENERAL y ESTADO FINANCIERO vencen en abril del año siguiente.
+//   - RG 90 (Registro de Comprobantes, Resolución General 90/2021): RG 90
+//     Mensual (código 955 en Marangatu) vence el mismo día que IVA, mismo
+//     mes; RG 90 Anual (código 956) vence en el 2do mes posterior al
+//     cierre fiscal.
 //   - Si la fecha cae sábado, domingo o feriado, se corre al siguiente
 //     día hábil.
 //   - El cierre fiscal es por cliente (columna `clientes.cierre_fiscal_mes`).
@@ -39,6 +43,7 @@ const MESES_POSTERIORES_AL_CIERRE = {
   ESTADO_FINANCIERO: 4, // se presenta junto con IRE GENERAL
   IRP_RSP: 3,           // Formulario 515 (Marangatu), igual que IRE SIMPLE
   IRP_RGC: 3,           // Formulario 516 (Marangatu), igual que IRE SIMPLE
+  RG90_ANUAL: 2,        // Código 956 (Marangatu): 2do mes posterior al cierre
 };
 
 function esFinDeSemana(fecha) {

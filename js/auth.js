@@ -21,9 +21,11 @@ const elLoginPassword = document.getElementById('login-password');
 const elLoginMensaje = document.getElementById('login-mensaje');
 const elBtnLogout = document.getElementById('btn-logout');
 const elUsuarioActual = document.getElementById('usuario-actual');
+const elBtnOlvideContrasena = document.getElementById('btn-olvide-contrasena');
 
-function mostrarMensajeLogin(texto) {
+function mostrarMensajeLogin(texto, tipo = 'error') {
   elLoginMensaje.textContent = texto;
+  elLoginMensaje.className = `mensaje mensaje-${tipo}`;
   elLoginMensaje.classList.remove('oculto');
 }
 
@@ -83,6 +85,29 @@ if (!supabaseAuth) {
   });
 
   elBtnLogout.addEventListener('click', () => supabaseAuth.auth.signOut());
+
+  // "Olvidé mi contraseña": Supabase manda el mail de recuperación si el
+  // email existe. No distinguimos si existe o no en el mensaje (por
+  // seguridad, para no confirmar qué emails están registrados).
+  if (elBtnOlvideContrasena) {
+    elBtnOlvideContrasena.addEventListener('click', async () => {
+      const email = elLoginEmail.value.trim();
+      if (!email) {
+        mostrarMensajeLogin('Escribí tu email arriba y volvé a hacer clic en el link.');
+        return;
+      }
+
+      elBtnOlvideContrasena.disabled = true;
+      try {
+        await supabaseAuth.auth.resetPasswordForEmail(email);
+      } catch (error) {
+        console.error('Error al pedir el restablecimiento de contraseña:', error);
+      } finally {
+        mostrarMensajeLogin('Si el email existe, te llegará un correo para restablecer la contraseña.', 'exito');
+        elBtnOlvideContrasena.disabled = false;
+      }
+    });
+  }
 }
 
 })();

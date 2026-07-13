@@ -90,15 +90,20 @@ async function asegurarPresentacionesDelPeriodoVigente() {
 // --- Filtro por obligación ---------------------------------------------
 
 async function cargarCatalogoObligaciones() {
-  const { data, error } = await supabasePresentaciones
-    .from('obligaciones')
-    .select('*')
-    .neq('periodicidad', 'manual')
-    .order('id');
+  const [{ data, error }, { data: configuracion, error: errorConfiguracion }] = await Promise.all([
+    supabasePresentaciones.from('obligaciones').select('*').neq('periodicidad', 'manual').order('id'),
+    supabasePresentaciones.from('configuracion_estudio').select('panel_rg90_visible').eq('id', 1).maybeSingle(),
+  ]);
 
   if (error) throw error;
 
-  obligacionesCache = data || [];
+  // Si falló la lectura de configuración, no ocultamos nada por un error
+  // transitorio de una tabla que no es la esencial de esta pantalla.
+  const panelRg90Visible = errorConfiguracion ? true : (configuracion?.panel_rg90_visible ?? true);
+
+  obligacionesCache = panelRg90Visible
+    ? (data || [])
+    : (data || []).filter((o) => o.codigo !== 'RG90_MENSUAL' && o.codigo !== 'RG90_ANUAL');
 
   const seleccionActual = elFiltroObligacion.value;
   elFiltroObligacion.innerHTML = '';
@@ -162,6 +167,10 @@ async function dibujarPresentaciones() {
     });
 
     dibujarGrupos(vigentes);
+    // La carga salió bien: si había quedado pegado un cartel de error de
+    // un intento anterior (por ejemplo, el primero antes de loguearse),
+    // lo ocultamos.
+    if (elPresentacionesMensaje) elPresentacionesMensaje.classList.add('oculto');
   } catch (error) {
     console.error('Error al mostrar presentaciones:', error);
     if (elPresentacionesMensaje) {
@@ -215,7 +224,6 @@ function dibujarGrupos(filas) {
           <th>RUC</th>
           <th>Clave</th>
           <th>Presentado</th>
-          <th>Fecha</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -234,7 +242,6 @@ function dibujarGrupos(filas) {
         <td>${escaparHtmlPresentaciones(fila.clientes.ruc)}</td>
         <td>${escaparHtmlPresentaciones(fila.clientes.clave_marangatu)}</td>
         <td class="celda-checkbox"><input type="checkbox" data-id="${fila.id}" ${marcado ? 'checked' : ''} /></td>
-        <td>${fila.fecha_presentacion ? formatearFechaVisiblePresentaciones(fila.fecha_presentacion) : '—'}</td>
       `;
 
       tbody.appendChild(tr);
@@ -243,14 +250,6 @@ function dibujarGrupos(filas) {
     grupo.appendChild(tabla);
     elGrupos.appendChild(grupo);
   }
-}
-
-function formatearFechaVisiblePresentaciones(fechaISOConHora) {
-  const fecha = new Date(fechaISOConHora);
-  const dia = String(fecha.getDate()).padStart(2, '0');
-  const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-  const anio = fecha.getFullYear();
-  return `${dia}/${mes}/${anio}`;
 }
 
 function escaparHtmlPresentaciones(texto) {
