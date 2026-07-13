@@ -22,6 +22,7 @@ Este documento junta, en las palabras del usuario, todo lo que falta implementar
 
 - [ ] **El "Membrete General" existente pasa a ser el único membrete del sistema** (ya no hay override por cliente — ver ítem de arriba en Clientes). Se usa para todos los clientes por igual al generar cualquier ficha de pago.
 - [ ] **Agregar soporte de logo** (imagen) a esa misma sección de membrete — hoy solo tiene nombre/dirección/teléfono/nota de vencimiento, todo texto.
+- [ ] **Nueva capacidad general: elegir qué paneles/opciones se muestran en el sistema.** Confirmado por el usuario (entre dos opciones que le di): no es solo sobre el logo — quiere poder activar/desactivar o mostrar-ocultar secciones/funciones de la app desde Configuración. **Alcance todavía impreciso**: falta definir exactamente qué paneles/opciones concretas se podrían ocultar (¿pantallas enteras? ¿columnas de una tabla? ¿secciones dentro de una pantalla?) — retomar y precisar con el usuario antes de programarlo, no asumir el alcance.
 
 ## Pantalla Calendario
 
@@ -40,6 +41,7 @@ Este documento junta, en las palabras del usuario, todo lo que falta implementar
 - [ ] **Historial pasa a ser editable, no solo de lectura**: hoy solo calcula y colorea fechas (verde/rojo/gris) pero no se puede tocar nada. Se pide poder marcar "Presentado" para CUALQUIER período pasado directamente desde acá (no solo el vigente, que es lo único editable hoy desde Presentaciones/Calendario) — motivo: cuando un período termina, Presentaciones lo "limpia" y pasa a Historial de solo lectura, así que si en su momento no se tildó, hoy no hay forma de corregirlo después. Al marcar un período viejo como presentado, la fecha de presentación se pone automática (la fecha de hoy, el día en que se tilda) — **confirmado por el usuario, no hace falta selector de fecha retroactiva**. Implica que Historial va a tener que poder crear/actualizar filas en `presentaciones` para períodos que hoy no tienen fila (la tabla `presentaciones` solo se genera automáticamente para el período vigente).
 - [ ] **Ampliar el rango de años visibles**: hoy solo muestra el año actual (mensuales) o actual+anterior (anuales) — se pide un rango más amplio, ejemplo dado por el usuario: 2022, 2023, 2024, 2025, 2026. Definir si es un selector de año o se listan todos esos años a la vez (a confirmar antes de programar).
 - [ ] **Agregar RG 90 al filtro de Obligación** (mensual 955 y anual 956), igual que el resto de las obligaciones — depende de que se agregue primero al catálogo (ver ítem en Calendario).
+- [ ] **Que la cuota ANUAL de honorarios se pueda ver acá también** (o en la pantalla que mejor quede) — el usuario lo pidió como "en Historial o en donde quede bien", dejando el lugar exacto a criterio. Como Historial hoy es específicamente sobre presentación de obligaciones (no honorarios), evaluar si conviene una sección aparte acá mismo, o si queda mejor integrado dentro de Honorarios (ligado al ítem ya anotado ahí de "vista para revisar el estado de pago por cliente") — a definir al momento de programarlo, no es un pedido cerrado todavía.
 
 ## Pantalla Honorarios
 
