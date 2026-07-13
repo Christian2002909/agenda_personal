@@ -167,6 +167,10 @@ async function cargarCalendario() {
 
     dibujarTablaCalendario(venceEsteMes);
     dibujarTablaAnualesNuevoEjercicio(anualesNuevoEjercicio);
+    // La carga salió bien: si había quedado pegado un cartel de error de
+    // un intento anterior (por ejemplo, el primero antes de loguearse),
+    // lo ocultamos.
+    if (elCalendarioMensaje) elCalendarioMensaje.classList.add('oculto');
   } catch (error) {
     console.error('Error al cargar el calendario:', error);
     if (elCalendarioMensaje) {

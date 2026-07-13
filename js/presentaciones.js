@@ -162,6 +162,10 @@ async function dibujarPresentaciones() {
     });
 
     dibujarGrupos(vigentes);
+    // La carga salió bien: si había quedado pegado un cartel de error de
+    // un intento anterior (por ejemplo, el primero antes de loguearse),
+    // lo ocultamos.
+    if (elPresentacionesMensaje) elPresentacionesMensaje.classList.add('oculto');
   } catch (error) {
     console.error('Error al mostrar presentaciones:', error);
     if (elPresentacionesMensaje) {

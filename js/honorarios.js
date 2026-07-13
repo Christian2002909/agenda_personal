@@ -285,6 +285,10 @@ elFormPago.addEventListener('submit', async (evento) => {
 
     mostrarMensajeHonorarios('Pago registrado correctamente.');
     elFormPago.reset();
+    // form.reset() vacía la fecha de vuelta (no tiene un valor "value" fijo
+    // en el HTML): la volvemos a completar con la de hoy, igual que al
+    // arrancar la pantalla.
+    if (elPagoFecha) elPagoFecha.value = formatearFechaISO(new Date());
     await cargarHonorarios();
   } catch (error) {
     console.error('Error al registrar pago:', error);
@@ -445,6 +449,12 @@ function generarFichaPago(cliente, honorario) {
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.
 window.cargarHonorarios = cargarHonorarios;
+
+// El campo de fecha de pago arranca con la fecha de hoy ya cargada (el
+// usuario la puede cambiar libremente); se completa una sola vez al
+// arrancar la pantalla, no cada vez que se recarga la tabla, para no
+// pisar una fecha que el contador ya haya empezado a cambiar.
+if (elPagoFecha) elPagoFecha.value = formatearFechaISO(new Date());
 
 cargarHonorarios();
 

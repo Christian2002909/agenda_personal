@@ -120,6 +120,10 @@ async function dibujarHistorial() {
     } else {
       dibujarGrupoAnual(clientes, obligacion, presentacionesPorClientePeriodo, feriadosSet);
     }
+    // La carga salió bien: si había quedado pegado un cartel de error de
+    // un intento anterior (por ejemplo, el primero antes de loguearse),
+    // lo ocultamos.
+    if (elHistorialMensaje) elHistorialMensaje.classList.add('oculto');
   } catch (error) {
     console.error('Error al mostrar el historial:', error);
     if (elHistorialMensaje) {
