@@ -857,6 +857,23 @@ create policy "perfiles_lectura_autenticados"
 
 grant select on public.perfiles to authenticated;
 
+-- Falta policy de INSERT: Configuración > "Crear responsable" da de alta un
+-- perfil para OTRO usuario recién creado (id = auth.users.id del usuario
+-- nuevo, no el propio de quien está logueado haciendo el alta), así que
+-- "with check (id = auth.uid())" no serviría -- se necesita el mismo
+-- criterio "sin restricción entre usuarios autenticados" que ya rige el
+-- resto de la app (ver sección "Cartera por responsable": cualquiera puede
+-- ver/editar la cartera de cualquier otro, no hay rol admin todavía).
+drop policy if exists "perfiles_insertar_autenticados" on public.perfiles;
+
+create policy "perfiles_insertar_autenticados"
+    on public.perfiles
+    for insert
+    to authenticated
+    with check (true);
+
+grant insert on public.perfiles to authenticated;
+
 -- ---------------------------------------------------------------------
 -- 15.1 BACKFILL de clientes.responsable_id (columna agregada en la
 --      sección 1, ver comment on column más arriba) -- va acá porque recién

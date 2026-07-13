@@ -379,6 +379,7 @@
         <button type="button" class="config-tab-boton activo" data-config-tab="config-tab-tema">Tema</button>
         <button type="button" class="config-tab-boton" data-config-tab="config-tab-membrete">Membrete</button>
         <button type="button" class="config-tab-boton" data-config-tab="config-tab-paneles">Paneles</button>
+        <button type="button" class="config-tab-boton" data-config-tab="config-tab-usuarios">Usuarios</button>
       </div>
 
       <div id="config-tab-tema" class="config-tab-panel">
@@ -451,6 +452,42 @@
             </label>
             <small>La sección solo aparece desde febrero, además de requerir este switch activado (ver js/honorarios.js).</small>
           </div>
+        </section>
+      </div>
+
+      <div id="config-tab-usuarios" class="config-tab-panel oculto">
+        <section class="tarjeta">
+          <h2>Crear Responsable</h2>
+          <p>
+            Crea una cuenta de acceso REAL a la app (la persona se loguea después con su propio
+            email y contraseña) y su perfil. No hay restricción entre usuarios: cualquiera puede
+            seguir viendo y editando la cartera de cualquier otro.
+          </p>
+          <div id="configuracion-usuarios-mensaje" class="mensaje oculto"></div>
+          <form id="form-crear-responsable">
+            <div class="fila-form">
+              <label for="responsable-nombre">Nombre</label>
+              <input type="text" id="responsable-nombre" placeholder="Ej: Nombre del responsable" spellcheck="true" required />
+            </div>
+            <div class="fila-form">
+              <label for="responsable-email">Email</label>
+              <input type="email" id="responsable-email" autocomplete="off" required />
+            </div>
+            <div class="fila-form">
+              <label for="responsable-password">Contraseña inicial</label>
+              <input type="text" id="responsable-password" autocomplete="off" spellcheck="false" minlength="6" required />
+              <button type="button" id="btn-generar-password" class="boton boton-secundario">Generar contraseña</button>
+              <small>
+                Se muestra en texto plano a propósito: después de crear la cuenta hay que
+                comunicarle este email y esta contraseña a la persona, ya que no hay garantía de
+                que le llegue un mail de confirmación. Mínimo 6 caracteres.
+              </small>
+            </div>
+            <div class="acciones-form">
+              <button type="submit" class="boton boton-primario">Crear responsable</button>
+            </div>
+          </form>
+          <div id="responsable-creado-resultado" class="resumen-importacion oculto"></div>
         </section>
       </div>
 
