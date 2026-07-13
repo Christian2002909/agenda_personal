@@ -16,6 +16,12 @@
 // presente o futuro) es clickeable y tilda/destilda "presentado" en la
 // tabla `presentaciones`, creando la fila si todavía no existía (esa tabla
 // solo se autogenera para el período vigente desde presentaciones.js).
+//
+// El selector "Ver cartera de" (Yo / cada perfil / Todos) filtra los
+// clientes mostrados por `clientes.responsable_id` -- mismo patrón que ya
+// usa js/presentaciones.js; es solo un filtro de visualización, no de
+// acceso (cualquiera puede ver y marcar presentado clientes de cualquier
+// responsable).
 // -----------------------------------------------------------------------
 
 (function () {
@@ -25,6 +31,7 @@ const { formatearFechaISO, calcularFechaVencimiento, DIA_POR_TERMINACION_RUC } =
 
 const elFiltroObligacion = document.getElementById('historial-filtro-obligacion');
 const elFiltroAnio = document.getElementById('historial-filtro-anio');
+const elFiltroCartera = document.getElementById('historial-filtro-cartera');
 const elGrupos = document.getElementById('historial-grupos');
 const elSinHistorial = document.getElementById('sin-historial');
 const elHistorialMensaje = document.getElementById('historial-mensaje');
@@ -36,7 +43,18 @@ const NOMBRES_MES_HISTORIAL = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 
 // año actual, calculado en el momento (nunca hardcodeado).
 const ANIO_MINIMO_HISTORIAL = 2022;
 
+// Valores especiales del selector "Ver cartera de" (los perfiles puntuales
+// usan directamente su uuid como value) -- mismas constantes que ya usa
+// js/presentaciones.js para el mismo selector.
+const VALOR_CARTERA_YO = 'yo';
+const VALOR_CARTERA_TODOS = 'todos';
+
 let obligacionesCache = [];
+// Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
+let perfilesCache = [];
+// uuid del usuario logueado (auth.users.id vía supabase.auth.getSession()),
+// usado para la opción "Yo". null si no se pudo determinar.
+let usuarioActualId = null;
 
 // --- Filtro por obligación ---------------------------------------------
 
@@ -97,6 +115,75 @@ function poblarFiltroAnio() {
 
 if (elFiltroAnio) elFiltroAnio.addEventListener('change', () => dibujarHistorial());
 
+// --- Usuario logueado y catálogo de perfiles, para "Ver cartera de" -------
+
+async function cargarUsuarioActual() {
+  try {
+    const { data, error } = await supabaseHistorial.auth.getSession();
+    if (error) throw error;
+    usuarioActualId = data?.session?.user?.id ?? null;
+  } catch (error) {
+    console.error('Error al obtener el usuario logueado:', error);
+    usuarioActualId = null;
+  }
+}
+
+async function cargarPerfiles() {
+  const { data, error } = await supabaseHistorial.from('perfiles').select('id, nombre').order('nombre');
+  if (error) throw error;
+  perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+}
+
+// Arma las opciones "Yo" / cada perfil / "Todos". Si ya había una selección
+// (por ejemplo, se volvió a esta pestaña), la respetamos; si es la primera
+// vez que se arma el selector, arranca en "Yo" (confirmado por el usuario).
+function poblarFiltroCartera() {
+  if (!elFiltroCartera) return;
+
+  const seleccionActual = elFiltroCartera.value;
+  elFiltroCartera.innerHTML = '';
+
+  const opcionYo = document.createElement('option');
+  opcionYo.value = VALOR_CARTERA_YO;
+  opcionYo.textContent = 'Yo';
+  elFiltroCartera.appendChild(opcionYo);
+
+  for (const perfil of perfilesCache) {
+    const opcion = document.createElement('option');
+    opcion.value = perfil.id;
+    opcion.textContent = perfil.nombre;
+    elFiltroCartera.appendChild(opcion);
+  }
+
+  const opcionTodos = document.createElement('option');
+  opcionTodos.value = VALOR_CARTERA_TODOS;
+  opcionTodos.textContent = 'Todos';
+  elFiltroCartera.appendChild(opcionTodos);
+
+  const sigueExistiendo = [...elFiltroCartera.options].some((o) => o.value === seleccionActual);
+  elFiltroCartera.value = sigueExistiendo ? seleccionActual : VALOR_CARTERA_YO;
+}
+
+if (elFiltroCartera) elFiltroCartera.addEventListener('change', () => dibujarHistorial());
+
+// Clientes con responsable_id NULL (los que no tenían un match exacto en el
+// backfill, ver schema.sql sección 15.1): no se les puede atribuir a nadie
+// en particular, así que solo aparecen en "Todos" -- mismo criterio que
+// js/presentaciones.js.
+function filtrarClientesPorCartera(clientes) {
+  const seleccion = elFiltroCartera?.value || VALOR_CARTERA_YO;
+
+  if (seleccion === VALOR_CARTERA_TODOS) return clientes;
+
+  if (seleccion === VALOR_CARTERA_YO) {
+    if (!usuarioActualId) return [];
+    return clientes.filter((c) => c.responsable_id === usuarioActualId);
+  }
+
+  // Un perfil puntual elegido del selector (value = uuid del perfil).
+  return clientes.filter((c) => c.responsable_id === seleccion);
+}
+
 // --- Cargar y mostrar ----------------------------------------------------
 
 async function cargarHistorial() {
@@ -104,7 +191,8 @@ async function cargarHistorial() {
 
   try {
     poblarFiltroAnio();
-    await cargarCatalogoObligaciones();
+    await Promise.all([cargarCatalogoObligaciones(), cargarUsuarioActual(), cargarPerfiles()]);
+    poblarFiltroCartera();
     await dibujarHistorial();
   } catch (error) {
     console.error('Error al cargar el historial:', error);
@@ -130,7 +218,7 @@ async function dibujarHistorial() {
     ] = await Promise.all([
       supabaseHistorial
         .from('cliente_obligaciones')
-        .select('clientes(id, razon_social, ruc, terminacion_ruc, cierre_fiscal_mes)')
+        .select('clientes(id, razon_social, ruc, terminacion_ruc, cierre_fiscal_mes, responsable_id)')
         .eq('obligacion_id', obligacionId),
       supabaseHistorial
         .from('presentaciones')
@@ -144,9 +232,10 @@ async function dibujarHistorial() {
     if (errorFeriados) throw errorFeriados;
 
     const feriadosSet = new Set((feriados || []).map((f) => f.fecha));
-    const clientes = (clienteObligaciones || [])
+    const clientesSinFiltrarCartera = (clienteObligaciones || [])
       .map((fila) => fila.clientes)
       .filter((cliente) => cliente && cliente.terminacion_ruc !== null && cliente.terminacion_ruc !== undefined);
+    const clientes = filtrarClientesPorCartera(clientesSinFiltrarCartera);
 
     // Clave "cliente_id-periodo" -> fila de presentaciones, para no tener
     // que recorrer el arreglo entero por cada celda.

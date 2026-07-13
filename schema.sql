@@ -86,6 +86,23 @@ alter table public.clientes
 alter table public.clientes
     add column if not exists membrete_telefono text;
 
+-- Referencia real al usuario responsable (uuid a auth.users), en paralelo a
+-- `responsable` (texto libre, ver comentario de esa columna más abajo).
+-- Nullable a propósito: clientes cargados antes de esta columna quedan sin
+-- asignar salvo que el backfill de abajo encuentre una coincidencia exacta
+-- de nombre contra `perfiles`; no hay forma de inferirlo mejor que eso de
+-- forma automática. Sirve para poder filtrar "cartera de tal responsable"
+-- de forma confiable en vez de comparar por texto (frágil ante
+-- perfiles renombrados/borrados).
+alter table public.clientes
+    add column if not exists responsable_id uuid references auth.users(id);
+
+-- El backfill contra `perfiles.nombre` (coincidencia exacta de texto) vive
+-- más abajo, DESPUÉS de la sección 15 (tabla `perfiles`) -- acá arriba
+-- `perfiles` todavía no existe en una instalación fresca, así que un UPDATE
+-- contra ella en este punto del archivo rompería el pegado completo de
+-- schema.sql en un Supabase nuevo.
+
 -- "Tipo de Contribuyente" quedó redundante desde que cada cliente elige a
 -- mano qué obligaciones le corresponden (tabla cliente_obligaciones, ver
 -- sección 6.1): antes se usaba solo para sugerir esas obligaciones. Se
@@ -111,6 +128,8 @@ comment on column public.clientes.terminacion_ruc is
     'Último dígito antes del guion del RUC; se usa luego para el calendario de vencimientos de IVA (SET).';
 comment on column public.clientes.responsable is
     'Encargado del cliente dentro del estudio (texto libre, sin FK a usuarios todavía).';
+comment on column public.clientes.responsable_id is
+    'Referencia real (uuid) al usuario responsable en auth.users/perfiles, en paralelo al texto libre de `responsable`. Nullable: clientes viejos sin backfill exitoso quedan NULL hasta asignarse a mano. Se usa para filtrar cartera por responsable de forma confiable (a diferencia de comparar `responsable` por texto).';
 comment on column public.clientes.cierre_fiscal_mes is
     'Mes de cierre del ejercicio fiscal: 12 = diciembre (regla general), 4 = abril, 6 = junio (excepciones del Decreto 3182/2019). Usado por calendario-logica.js para IRE SIMPLE/GENERAL, ESTADO FINANCIERO, IRP-RSP e IRP-RGC.';
 comment on column public.clientes.clave_marangatu is
@@ -126,6 +145,12 @@ comment on column public.clientes.membrete_nombre is
 -- Filtro más frecuente: "mis clientes" por responsable.
 create index if not exists idx_clientes_responsable
     on public.clientes (responsable);
+
+-- Filtro por responsable real (uuid), para cuando las pantallas empiecen a
+-- filtrar "Ver cartera de: X" por responsable_id en vez de por el texto
+-- libre de arriba (ver docs/PEDIDOS_PENDIENTES.md, "Cartera por responsable").
+create index if not exists idx_clientes_responsable_id
+    on public.clientes (responsable_id);
 
 -- ---------------------------------------------------------------------
 -- 3. TRIGGER updated_at
@@ -831,6 +856,30 @@ create policy "perfiles_lectura_autenticados"
     using (true);
 
 grant select on public.perfiles to authenticated;
+
+-- ---------------------------------------------------------------------
+-- 15.1 BACKFILL de clientes.responsable_id (columna agregada en la
+--      sección 1, ver comment on column más arriba) -- va acá porque recién
+--      acá existe la tabla `perfiles` que necesita para cruzar.
+--
+--      Cruza el texto libre `clientes.responsable` contra `perfiles.nombre`
+--      por coincidencia EXACTA y completa `responsable_id` en los casos que
+--      coinciden; los clientes cuyo `responsable` no coincide con ningún
+--      perfil (texto libre viejo, tipeo distinto, perfil borrado/renombrado)
+--      quedan con responsable_id NULL -- no hay forma automática mejor de
+--      resolverlos, se asignan a mano después (ver
+--      docs/PEDIDOS_PENDIENTES.md, "Cartera por responsable").
+--
+--      IDEMPOTENTE a propósito: el `and responsable_id is null` hace que
+--      correr esto de nuevo (cada vez que se pega schema.sql entero) no
+--      pise una asignación manual hecha después del backfill, ni reordene
+--      nada si ya se resolvió.
+-- ---------------------------------------------------------------------
+update public.clientes
+set responsable_id = p.id
+from public.perfiles p
+where public.clientes.responsable = p.nombre
+  and public.clientes.responsable_id is null;
 
 -- ---------------------------------------------------------------------
 -- 16. TABLA configuracion_estudio
