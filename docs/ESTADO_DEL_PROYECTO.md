@@ -16,13 +16,12 @@ App de escritorio para un estudio contable en Paraguay. Controla clientes, oblig
 
 | Fase | Pantalla | Qué hace |
 |---|---|---|
-| 1 | Presentaciones | **Pantalla principal (se abre primero al entrar)**. Filtro por Obligación (arranca en IVA, incluye RG 90 Mensual/Anual), clientes agrupados por "VENCIMIENTO N - FECHA D" según terminación de RUC — igual que la planilla de control en Excel que usaba el estudio. Checkbox de presentado (sin columna de fecha, se sacó por pedido del usuario), y un link en cada cliente para editarlo (abre la pestaña Clientes) |
-| 2 | Clientes | **Solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano), campo **Responsable como lista desplegable** (se elige de los usuarios reales del sistema, tabla `perfiles`, ya no es texto libre), y qué obligaciones le corresponden (checkboxes, incluye RG 90 Mensual/Anual). Ya no tiene "Tipo de Contribuyente" ni la sección de membrete por cliente (el membrete quedó único y centralizado en Configuración) |
-| 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU, RG 90 Mensual, RG 90 Anual). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Calendario/Presentaciones/Historial para calcular vencimientos |
-| 4 | Calendario | Solo muestra lo que **vence EN EL MES EN CURSO** (no todo el período vigente) y todavía no se presentó, con la columna "Obligación" de vuelta. En **enero** aparece además una sección aparte con las obligaciones anuales que recién entraron en ejercicio nuevo (aviso adelantado, aunque su vencimiento real sea marzo/abril). Ambas cosas (la columna y la sección de enero) se pueden ocultar desde Configuración → Paneles. Se actualiza solo, nunca hay que recrearlo a mano |
-| 5 | Historial | Filtro por Obligación + **selector de año** (2022 en adelante), agrupado por vencimiento, grilla compacta con scroll horizontal solo si hace falta. Para obligaciones mensuales: 12 columnas del año elegido con la fecha exacta de vencimiento, verde/rojo/gris — **cada celda es editable**, tocarla marca/desmarca "presentado" para ese período aunque ya haya pasado, sin necesidad de pasar por Presentaciones/Calendario. Para las anuales: una fila por cliente del ejercicio elegido, con la misma lógica |
-| 6 | Honorarios | Cuota mensual y/o anual por cliente (independientes, se configuran en Clientes o editables directo desde acá), búsqueda por nombre/RUC, sección aparte para la cuota anual (visible solo desde febrero), registro de pago como fila desplegable por cliente (no un formulario fijo), edición de pagos ya cargados, vista de detalle de pagos por cliente y por período, estado "Al día"/"Debe" con deuda acumulada, y ficha de pago descargable en PDF (con logo del estudio si está cargado) |
-| 7 | Configuración | Organizada en pestañas: **Tema** (claro/oscuro, localStorage), **Membrete** (nombre/dirección/teléfono/nota/logo del estudio, único para todos los clientes, Supabase compartido) y **Paneles** (mostrar/ocultar secciones opcionales del sistema: aviso de enero en Calendario, columna Obligación en Calendario, visibilidad de RG 90, cuota anual de Honorarios) |
+| 1 | Presentaciones | **Pantalla principal (se abre primero al entrar), reemplaza también a la antigua pestaña Calendario (eliminada).** Sin filtro de Obligación: para cada cliente se muestran juntas TODAS sus obligaciones pendientes (mensuales y anuales, cada una con su fecha real de vencimiento), agrupadas por "VENCIMIENTO N - FECHA D" según terminación de RUC. Selector **"Ver cartera de"** (Yo / cada responsable / Todos, arranca en "Yo") para filtrar qué clientes se ven — sin restricción de acceso, cualquiera puede ver y marcar presentado la cartera de cualquier otro. Botón para importar/exportar clientes desde Excel |
+| 2 | Clientes | **Solo para cargar/editar** un cliente (sin listado propio — para ver los ya cargados hay que ir a Presentaciones). Tiene clave de Marangatu (texto plano), campo **Responsable como lista desplegable** (usuarios reales del sistema, se autoselecciona el usuario logueado al crear un cliente nuevo pero es editable), y qué obligaciones le corresponden (checkboxes, incluye RG 90 Mensual/Anual). Botón para importar/exportar la lista completa de clientes desde/hacia Excel. Ya no tiene "Tipo de Contribuyente" ni la sección de membrete por cliente (el membrete quedó único y centralizado en Configuración) |
+| 3 | Obligaciones | Catálogo fijo (IVA, IRE SIMPLE, IRE GENERAL, ESTADO FINANCIERO, IRP-RSP, IRP-RGC, IDU, RG 90 Mensual, RG 90 Anual). Ya no tiene pantalla propia — se usa desde Clientes para armar los checkboxes y desde Presentaciones/Historial para calcular vencimientos |
+| 4 | Historial | Filtro por Obligación + selector de cartera + **selector de año** (2022 en adelante), agrupado por vencimiento, grilla compacta con scroll horizontal solo si hace falta. Para obligaciones mensuales: 12 columnas del año elegido con la fecha exacta de vencimiento, verde/rojo/gris — **cada celda es editable**, tocarla marca/desmarca "presentado" para ese período aunque ya haya pasado, sin necesidad de pasar por Presentaciones. Para las anuales: una fila por cliente del ejercicio elegido, con la misma lógica |
+| 5 | Honorarios | Cuota mensual y/o anual por cliente (independientes, se configuran en Clientes o editables directo desde acá), selector de cartera + búsqueda por nombre/RUC, sección aparte para la cuota anual (visible solo desde febrero), registro de pago como fila desplegable por cliente (no un formulario fijo), edición de pagos ya cargados, vista de detalle de pagos por cliente y por período, estado "Al día"/"Debe" con deuda acumulada, ficha de pago descargable en PDF (con logo del estudio si está cargado), e importar/exportar cuotas e historial de pagos desde Excel |
+| 6 | Configuración | Organizada en pestañas: **Tema** (claro/oscuro, localStorage), **Membrete** (nombre/dirección/teléfono/nota/logo del estudio, único para todos los clientes, Supabase compartido) y **Paneles** (mostrar/ocultar secciones opcionales del sistema: visibilidad de RG 90, cuota anual de Honorarios) |
 
 ## Cómo levantar el proyecto en una PC nueva
 
@@ -46,12 +45,15 @@ js/auth.js                   Login/logout con Supabase Auth. Muestra #vista-logi
 js/navegacion.js             Muestra/oculta las vistas al hacer clic en el menú, y vuelve a pedir los
                               datos de esa pantalla (llama a window.cargarX())
 js/clientes.js               Pantalla Clientes: SOLO alta/edición (sin listado, ver window.editarClienteDesdeOtraVista)
-js/calendario-logica.js      Funciones puras de cálculo de fechas (día por RUC, ajuste por feriado, etc.)
-js/calendario.js             Pantalla Calendario (usa calendario-logica.js, filtra por cliente_obligaciones)
-js/presentaciones.js         Pantalla PRINCIPAL: filtro por Obligación, agrupado por vencimiento (como el Excel)
+js/calendario-logica.js      Funciones puras de cálculo de fechas (día por RUC, ajuste por feriado, etc.) --
+                              usadas por presentaciones.js e historial.js, ya no existe pantalla Calendario
+js/presentaciones.js         Pantalla PRINCIPAL: reemplaza a la vieja Calendario, muestra TODAS las
+                              obligaciones pendientes de cada cliente juntas, agrupado por vencimiento
 js/historial.js              Pantalla Historial
 js/honorarios.js             Pantalla Honorarios
-js/configuracion.js          Pantalla Configuración (tema claro/oscuro, aplica data-theme en <html>)
+js/configuracion.js          Pantalla Configuración (tema/membrete/paneles en pestañas)
+js/excel-utils.js            Helpers compartidos para leer/escribir .xlsx (usa `exceljs`), usados por
+                              clientes.js y honorarios.js para importar/exportar
 schema.sql                  Todo el esquema de la base de datos (Supabase/Postgres), con comentarios
 .env.example                 Plantilla de credenciales (copiar a .env y completar)
 ```
@@ -90,24 +92,16 @@ Antes, el Calendario y Presentaciones asumían que TODOS los clientes tenían to
 
 Cada cliente tiene un campo `clave_marangatu` (texto plano) — es la clave de acceso al Sistema Marangatu (SET) de ese contribuyente, igual que en el Excel que usaba el estudio antes de esta app. A propósito no está oculta ni encriptada: el pedido explícito fue que se vea de un vistazo. Se ve en la pantalla de Presentaciones (columna "Clave"), no hay listado de clientes aparte (ver siguiente sección).
 
-## Presentaciones es la pantalla principal; Clientes es solo para cargar
+## Presentaciones es la pantalla principal; absorbe a Calendario; Clientes es solo para cargar
 
-Reestructuración pedida por el usuario mostrándole cómo se veía su planilla Excel de control (una hoja por obligación, agrupada por "VENCIMIENTO N - FECHA D" según terminación de RUC, columnas N°/Nombre/RUC/Clave).
+Reestructuración pedida por el usuario mostrándole cómo se veía su planilla Excel de control (una hoja por obligación, agrupada por "VENCIMIENTO N - FECHA D" según terminación de RUC, columnas N°/Nombre/RUC/Clave), y después ampliada para reemplazar directamente a la pestaña Calendario (eliminada del todo — ni el archivo `js/calendario.js` ni la sección `#vista-calendario` existen más).
 
-- **`js/presentaciones.js`** es ahora la primera pestaña que se ve al loguearse (antes era Clientes). Tiene un filtro `<select>` por Obligación (arranca siempre en IVA, no hay opción "Todos" — se decidió así en vez de una vista mezclada porque el usuario prefirió una sola obligación a la vez, como las hojas del Excel). Para la obligación elegida, agrupa por terminación de RUC igual que el Excel (`VENCIMIENTO N - FECHA D`, usando `DIA_POR_TERMINACION_RUC` de `calendario-logica.js`) y muestra N° (correlativo sin cortes entre grupos), Nombre, RUC, Clave, y el checkbox de Presentado con fecha. El nombre del cliente es un botón que abre la pestaña Clientes para editarlo (`window.editarClienteDesdeOtraVista`).
+- **`js/presentaciones.js`** es la primera pestaña al loguearse. Ya NO tiene filtro por Obligación — para cada cliente se calculan y muestran TODAS las obligaciones que tiene asignadas (`cliente_obligaciones`) que estén vigentes y todavía no presentadas, mensuales y anuales por igual: una obligación anual aparece como pendiente desde que arranca su ejercicio (enero) y sigue apareciendo, con su fecha real (marzo/abril/etc.), hasta que se marca presentada — no hay corte por "solo este mes" ni aviso aparte de enero, es simplemente una fila más.
+- **Agrupación**: por terminación de RUC igual que antes (`VENCIMIENTO N - FECHA D`, el día es fijo por terminación, no cambia entre obligaciones). Dentro de cada grupo, un bloque por cliente: Nombre/RUC/Clave se muestran una sola vez, y debajo la lista de sus obligaciones pendientes (ordenadas por fecha más próxima primero), cada una con su nombre, su fecha de vencimiento y su propio checkbox de "Presentado". Al tildar una, desaparece de Presentaciones — desmarcarla (por si se tildó por error) se hace desde Historial, que sí permite editar cualquier período.
+- **Selector "Ver cartera de"**: arriba de la lista, `<select>` con "Yo" / cada responsable (tabla `perfiles`) / "Todos" — arranca en "Yo". Filtra los clientes mostrados por `clientes.responsable_id`; los clientes sin responsable asignado (`responsable_id` NULL) solo aparecen en "Todos". Es puramente un filtro de vista: no hay restricción de acceso, cualquiera puede marcar presentado un cliente de cualquier responsable eligiéndolo del selector.
 - **`js/clientes.js`** perdió su tabla/listado y su filtro por responsable: ahora solo tiene el formulario de alta/edición, siempre visible (no hay botón "+ Nuevo Cliente" para mostrarlo/ocultarlo). Al entrar directo a esta pestaña arranca en blanco ("Nuevo Cliente"); si se llega desde el botón de editar en Presentaciones, arranca con los datos de ese cliente cargados.
 - El truco para que no se pisen: `editarClienteDesdeOtraVista(clienteId)` carga los datos del cliente y sus obligaciones, pone una bandera `ignorarProximaCarga = true`, y recién ahí llama a `window.mostrarVista('vista-clientes')` (que dispara `cargarClientes()` vía `navegacion.js`) — `cargarClientes()` ve la bandera, no resetea el formulario, y la función de edición lo completa con los datos ya cargados. Sin esta bandera, `cargarClientes()` limpiaría el formulario a "Nuevo Cliente" antes de poder mostrarlo lleno.
-
-## Calendario: se limpia solo cada mes/año
-
-Antes, `js/calendario.js` mostraba TODOS los `calendario_vencimientos` no presentados, sin importar de qué período eran — con obligaciones mensuales (IVA) esto iba acumulando filas viejas sin presentar mes tras mes. Ahora, igual que Presentaciones, solo muestra el **período VIGENTE** de cada obligación (comparando contra `obtenerPeriodoVigente()`): lo de períodos anteriores, se haya presentado o no, deja de aparecer acá y solo queda visible en Historial.
-
-## Calendario: solo el mes en curso, anuales aparte en enero
-
-Antes el Calendario mostraba todo el período vigente no presentado (podía incluir una obligación anual todo el año, aunque su vencimiento real fuera recién en marzo/abril). Ahora `js/calendario.js` separa la lista en dos:
-
-- **Lista principal**: solo lo que vence dentro del mes calendario actual (compara año y mes de `fecha_vencimiento` contra hoy).
-- **"Obligaciones Anuales — Nuevo Ejercicio"** (`#seccion-anuales-nuevo-ejercicio`): sección aparte que solo aparece en **enero**, con las obligaciones anuales cuyo período vigente ya cambió de ejercicio aunque su vencimiento real (marzo/abril) todavía esté lejos — sirve de aviso temprano. El resto del año esta sección queda oculta.
+- La tabla `calendario_vencimientos` (usada por la vieja pantalla Calendario) quedó en `schema.sql` sin uso — nada la escribe ni la lee ya. No se borró de la base.
 
 ## Honorarios: cuota mensual y/o anual, pago como fila desplegable, ficha de pago en PDF
 
@@ -138,20 +132,28 @@ Nueva obligación agregada al catálogo, con dos variantes independientes (un cl
 - **RG 90 Anual** (`RG90_ANUAL`): vence el segundo mes posterior al cierre fiscal (ej. cierre diciembre → vence febrero), con el día calculado con la misma tabla de terminación de RUC que el resto — esto último es una asunción (las fuentes oficiales no publican una tabla propia por RUC para esta obligación puntual, solo dicen que sigue "el calendario de vencimientos de las declaraciones juradas informativas"), a ajustar si en la práctica con Marangatu no coincide.
 - Aparece en Calendario, Presentaciones e Historial igual que cualquier otra obligación. Se puede ocultar de los filtros y checkboxes desde Configuración → Paneles (`panel_rg90_visible`), para estudios que no la necesiten.
 
-## Responsable por cliente: ahora es una lista de usuarios reales
+## Cartera por responsable: cada usuario ve y edita la de cualquier otro
 
-El campo "Responsable" del formulario de Clientes pasó de texto libre a un `<select>` poblado con los usuarios reales del sistema (tabla `perfiles`, columna `nombre`). Para que esto funcione, se tuvo que abrir la policy de lectura de `perfiles` (antes cada usuario solo podía leer su propio perfil, `using (id = auth.uid())`) a `using (true)` para cualquier autenticado — sigue sin exponerse a `anon`. Se sigue guardando como texto libre en `clientes.responsable` (el nombre elegido, no el uuid), así que no rompe nada de lo que ya lee ese campo. Es solo un cambio de cómo se carga el dato — todavía NO filtra ni restringe qué clientes ve cada usuario (eso quedó pausado, ver más abajo).
+La base ya era compartida desde el principio (todas las PC del estudio se conectan al mismo proyecto de Supabase con las mismas credenciales) — esto no fue un cambio de arquitectura, sino de permisos/interfaz sobre datos que ya eran comunes a todos.
+
+- **`clientes.responsable_id`** (uuid, referencia `auth.users`, nullable, con índice) es la fuente de verdad para filtrar "de quién es cada cliente". Se agregó con backfill automático: para los clientes que ya existían, se cruzó el viejo `clientes.responsable` (texto libre) contra `perfiles.nombre` por coincidencia exacta — los que coincidieron quedaron asignados, el resto quedó con `responsable_id` NULL (no hay forma automática mejor de resolverlo, se asigna a mano si hace falta).
+- El campo "Responsable" del formulario de Clientes es un `<select>` poblado con `perfiles` (columna `nombre`) — se abrió la policy de lectura de `perfiles` (antes cada usuario solo podía leer su propio perfil) a `using (true)` para cualquier autenticado, sigue sin exponerse a `anon`. Al crear un cliente NUEVO, el select arranca preseleccionado en el usuario logueado (obtenido de la sesión activa), pero sigue siendo editable. Se sigue guardando el nombre en texto en `clientes.responsable` (compatibilidad con lo que ya lo lee como texto) además del `responsable_id`.
+- **Sin restricción de acceso**: cualquier usuario logueado puede ver Y editar la cartera de cualquier otro — no hay rol admin ni RLS más restrictiva para esto. El selector "Ver cartera de" (Presentaciones, Historial, Honorarios — mismo patrón replicado en las tres pantallas, arranca en "Yo") es únicamente un filtro de visualización.
 
 ## Paneles: mostrar/ocultar secciones opcionales desde Configuración
 
-Nueva pestaña "Paneles" en Configuración, con 4 switches guardados en `configuracion_estudio` (todos `true` por defecto, para no cambiar el comportamiento de nadie hasta que se apague alguno a mano):
+Pestaña "Paneles" en Configuración, con switches guardados en `configuracion_estudio` (todos `true` por defecto, para no cambiar el comportamiento de nadie hasta que se apague alguno a mano):
 
-- `panel_calendario_nuevo_ejercicio`: sección de enero en Calendario.
-- `panel_calendario_columna_obligacion`: columna "Obligación" en Calendario.
 - `panel_rg90_visible`: si RG 90 aparece en filtros/checkboxes.
 - `panel_honorarios_cuota_anual`: si se muestra la sección de cuota anual en Honorarios.
 
-Pensado para crecer más adelante con más opciones a medida que se necesiten — esta primera versión cubre solo estas 4.
+(Los switches `panel_calendario_nuevo_ejercicio`/`panel_calendario_columna_obligacion` que existían para la vieja pantalla Calendario se sacaron de la interfaz al eliminarla — las columnas siguen en `configuracion_estudio` sin usarse, no se borraron.) Pensado para crecer más adelante con más opciones a medida que se necesiten.
+
+## Importar/exportar Excel (Clientes y Honorarios)
+
+- **Clientes**: botón "Importar desde Excel" (columnas RUC, Razón Social, Terminación RUC, Clave Marangatu, Cierre Fiscal, y una columna Sí/No por cada obligación del catálogo). Por RUC exacto: si ya existe, actualiza ese cliente (sin tocar su responsable); si no existe, lo crea asignado al usuario que hace la importación. Cada fila corre en su propio try/catch — un dato inválido no traba el resto — y al final se muestra un resumen de creados/actualizados/salteados con motivo. Botón "Exportar a Excel" con las mismas columnas, sirve de plantilla para el importador.
+- **Honorarios**: dos importadores separados — cuotas (RUC + Cuota Mensual + Cuota Anual, hace `upsert`) e historial de pagos (RUC + tipo + monto + período + forma de pago + recibo + fecha, hace `insert`; si el RUC no existe en Clientes, esa fila se saltea). Exportación con dos hojas: "Honorarios" (resumen por cliente) e "Historial de Pagos" (todos los pagos), pensada como respaldo completo.
+- **Librería usada**: `exceljs` (no `xlsx`/SheetJS — se probó primero pero `npm audit` marcó dos vulnerabilidades de severidad alta sin parche disponible en el registro de npm en esa versión; como esta función procesa archivos que puede traer cualquiera, se cambió a una librería sin vulnerabilidades conocidas de esa gravedad). Todo el código vive en `js/excel-utils.js` (funciones puras, mismo patrón que `calendario-logica.js`), sin IPC ni cambios en `main.js`: leer un archivo usa `File.prototype.arrayBuffer()` sobre un `<input type="file">`, y descargar arma un `Blob` + `<a download>` temporal.
 
 ## Tema claro/oscuro
 
@@ -176,7 +178,7 @@ Acumula TODA la deuda desde que se configuró el honorario de ese cliente (`hono
 3. Si más adelante se necesita distinguir permisos por rol (admin vs responsable), usar la columna `perfiles.rol` para escribir policies más finas (hoy cualquier autenticado tiene acceso total — ver sección 5/14 de `schema.sql`).
 4. Evaluar agregar un flujo de invitación/alta de usuarios desde la propia app (hoy se crean a mano en el dashboard de Supabase).
 5. Corrector ortográfico (`spellcheck="true"`) y formato de miles con punto ya están aplicados en los campos de texto y montos, respectivamente — sin pendientes ahí.
-6. Cualquier tema de acceso/visibilidad por usuario (más allá de que el campo Responsable ahora se elija de una lista) queda fuera de este documento por ahora — se retoma directamente con el usuario cuando corresponda.
+6. La cartera por responsable y el import/export de Excel ya están implementados (ver secciones de arriba) — no quedan pendientes de esa ronda.
 
 > Nota: la Fase 4 (Presentaciones) no tenía ningún problema real — el comentario anterior sobre "revisar Fase 4" fue una falsa alarma, confirmada con el usuario.
 
