@@ -52,7 +52,6 @@
     <nav class="nav-principal">
       <button class="nav-boton activo" data-vista="vista-presentaciones">Presentaciones</button>
       <button class="nav-boton" data-vista="vista-clientes">Clientes</button>
-      <button class="nav-boton" data-vista="vista-calendario">Calendario</button>
       <button class="nav-boton" data-vista="vista-historial">Historial</button>
       <button class="nav-boton" data-vista="vista-honorarios">Honorarios</button>
       <button class="nav-boton" data-vista="vista-configuracion">Configuración</button>
@@ -146,60 +145,21 @@
     </section>
 
     <!-- ============================== -->
-    <!-- VISTA: Calendario perpetuo     -->
-    <!-- ============================== -->
-    <section id="vista-calendario" class="vista oculto">
-      <section class="tarjeta">
-        <h2>Calendario de Vencimientos</h2>
-        <div id="calendario-mensaje" class="mensaje mensaje-error oculto"></div>
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th id="calendario-th-obligacion">Obligación</th>
-              <th>Período</th>
-              <th>Vencimiento</th>
-            </tr>
-          </thead>
-          <tbody id="tabla-calendario-body">
-            <!-- Las filas se agregan dinámicamente desde js/calendario.js -->
-          </tbody>
-        </table>
-        <p id="sin-vencimientos" class="sin-datos oculto">
-          No hay vencimientos este mes.
-        </p>
-      </section>
-
-      <!-- Solo se muestra en enero: aviso adelantado de las obligaciones
-           anuales del ejercicio que recién arrancó (su vencimiento real
-           puede ser recién en marzo/abril). -->
-      <section id="seccion-anuales-nuevo-ejercicio" class="tarjeta oculto">
-        <h2>Obligaciones Anuales — Nuevo Ejercicio</h2>
-        <table class="tabla-clientes">
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Período</th>
-              <th>Vencimiento</th>
-            </tr>
-          </thead>
-          <tbody id="tabla-anuales-nuevo-ejercicio-body">
-            <!-- Las filas se agregan dinámicamente desde js/calendario.js -->
-          </tbody>
-        </table>
-      </section>
-    </section>
-
-    <!-- ============================== -->
     <!-- VISTA: Presentaciones          -->
     <!-- ============================== -->
+    <!-- Pantalla principal: absorbe lo que antes hacía la pestaña Calendario
+         (aparte, ya eliminada) -- para cada cliente se muestran TODAS sus
+         obligaciones pendientes/vigentes juntas (mensuales y anuales), cada
+         una con su fecha real de vencimiento, en vez de filtrar por una
+         sola obligación a la vez. -->
     <section id="vista-presentaciones" class="vista">
       <section class="tarjeta">
-        <h2>Presentaciones del Período Vigente</h2>
+        <h2>Presentaciones Pendientes</h2>
         <div class="fila-form">
-          <label for="presentaciones-filtro-obligacion">Obligación</label>
-          <select id="presentaciones-filtro-obligacion">
-            <!-- Las opciones se arman dinámicamente desde js/presentaciones.js, una por obligación del catálogo -->
+          <label for="presentaciones-filtro-cartera">Ver cartera de</label>
+          <select id="presentaciones-filtro-cartera">
+            <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
+                 "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
           </select>
         </div>
         <div id="presentaciones-mensaje" class="mensaje mensaje-error oculto"></div>
@@ -207,7 +167,7 @@
           <!-- Los grupos "VENCIMIENTO N - FECHA D" se arman dinámicamente desde js/presentaciones.js -->
         </div>
         <p id="sin-presentaciones" class="sin-datos oculto">
-          No hay clientes con esta obligación asignada para el período vigente.
+          No hay obligaciones pendientes para mostrar.
         </p>
       </section>
     </section>
@@ -428,18 +388,6 @@
           <div id="configuracion-paneles-mensaje" class="mensaje oculto"></div>
           <div class="fila-form">
             <label class="opcion-checkbox">
-              <input type="checkbox" id="panel-calendario-nuevo-ejercicio" />
-              Mostrar aviso de obligaciones anuales en enero (Calendario)
-            </label>
-          </div>
-          <div class="fila-form">
-            <label class="opcion-checkbox">
-              <input type="checkbox" id="panel-calendario-columna-obligacion" />
-              Mostrar la columna "Obligación" en la tabla de Calendario
-            </label>
-          </div>
-          <div class="fila-form">
-            <label class="opcion-checkbox">
               <input type="checkbox" id="panel-rg90-visible" />
               Mostrar RG 90 (Mensual y Anual) en los filtros y en los checkboxes de Clientes
             </label>
@@ -470,17 +418,16 @@
   <div id="ficha-pago-imprimir" class="oculto"></div>
 
   <!-- Cargamos los scripts con la lógica de cada pantalla. Adentro de
-       clientes.js, calendario.js, presentaciones.js, historial.js y
-       honorarios.js, con require(), se carga también supabaseClient.js.
-       navegacion.js solo muestra/oculta secciones, no necesita conexión a
-       Supabase. auth.js maneja el login/logout y muestra #app-autenticado
-       recién cuando hay sesión válida. configuracion.js aplica el tema
-       claro/oscuro y no necesita Supabase tampoco. -->
+       clientes.js, presentaciones.js, historial.js y honorarios.js, con
+       require(), se carga también supabaseClient.js. navegacion.js solo
+       muestra/oculta secciones, no necesita conexión a Supabase. auth.js
+       maneja el login/logout y muestra #app-autenticado recién cuando hay
+       sesión válida. configuracion.js aplica el tema claro/oscuro y no
+       necesita Supabase tampoco. -->
   <script src="js/configuracion.js"></script>
   <script src="js/navegacion.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/clientes.js"></script>
-  <script src="js/calendario.js"></script>
   <script src="js/presentaciones.js"></script>
   <script src="js/historial.js"></script>
   <script src="js/honorarios.js"></script>

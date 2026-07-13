@@ -31,8 +31,6 @@ const elConfigLogo = document.getElementById('config-logo');
 const elConfigLogoPreview = document.getElementById('config-logo-preview');
 const elConfiguracionEstudioMensaje = document.getElementById('configuracion-estudio-mensaje');
 
-const elPanelCalendarioNuevoEjercicio = document.getElementById('panel-calendario-nuevo-ejercicio');
-const elPanelCalendarioColumnaObligacion = document.getElementById('panel-calendario-columna-obligacion');
 const elPanelRg90Visible = document.getElementById('panel-rg90-visible');
 const elPanelHonorariosCuotaAnual = document.getElementById('panel-honorarios-cuota-anual');
 const elConfiguracionPanelesMensaje = document.getElementById('configuracion-paneles-mensaje');
@@ -126,8 +124,6 @@ async function cargarConfiguracion() {
     mostrarPreviewLogo(logoBase64Actual);
     if (elConfigLogo) elConfigLogo.value = '';
 
-    if (elPanelCalendarioNuevoEjercicio) elPanelCalendarioNuevoEjercicio.checked = data?.panel_calendario_nuevo_ejercicio ?? true;
-    if (elPanelCalendarioColumnaObligacion) elPanelCalendarioColumnaObligacion.checked = data?.panel_calendario_columna_obligacion ?? true;
     if (elPanelRg90Visible) elPanelRg90Visible.checked = data?.panel_rg90_visible ?? true;
     if (elPanelHonorariosCuotaAnual) elPanelHonorariosCuotaAnual.checked = data?.panel_honorarios_cuota_anual ?? true;
   } catch (error) {
@@ -201,8 +197,6 @@ elFormConfiguracionEstudio.addEventListener('submit', async (evento) => {
 
 // Mapa columna -> elemento, para no repetir el mismo listener 4 veces.
 const SWITCHES_PANELES = [
-  ['panel_calendario_nuevo_ejercicio', elPanelCalendarioNuevoEjercicio],
-  ['panel_calendario_columna_obligacion', elPanelCalendarioColumnaObligacion],
   ['panel_rg90_visible', elPanelRg90Visible],
   ['panel_honorarios_cuota_anual', elPanelHonorariosCuotaAnual],
 ];
