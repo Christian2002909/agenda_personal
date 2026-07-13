@@ -292,10 +292,76 @@ input[type='date'] {
   color: var(--color-neutro-texto);
 }
 
+/* Celda de Historial editable: todo el área de la celda es un <label> que
+   envuelve el checkbox de "presentado" -- clickear en cualquier parte de la
+   celda (no solo el checkbito) tilda/destilda ese período, mismo patrón que
+   el checkbox de Presentaciones pero encapsulado acá para que cada celda
+   quede clickeable entera. */
+.celda-historial-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 8px 10px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+/* Variante compacta: la grilla mensual de Historial (12 columnas de mes)
+   apila el checkbox arriba de la fecha en vez de ponerlos lado a lado, para
+   que cada columna de mes pueda ser bien angosta sin desbordar. */
+.celda-historial-toggle-compacta {
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 2px;
+}
+
+.celda-historial-toggle input[type='checkbox'] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.celda-historial-toggle span {
+  line-height: 1.2;
+}
+
+.tabla-historial-mensual {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 760px;
+}
+
 .tabla-historial-mensual th,
 .tabla-historial-mensual td {
-  padding: 6px 4px;
-  font-size: 12px;
+  padding: 4px 2px;
+  font-size: 11px;
+}
+
+.tabla-historial-mensual td.celda-historial {
+  padding: 0;
+}
+
+.tabla-historial-mensual th:first-child,
+.tabla-historial-mensual td:first-child {
+  width: 170px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+.tabla-historial-mensual th:nth-child(2),
+.tabla-historial-mensual td:nth-child(2) {
+  width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fila-form {

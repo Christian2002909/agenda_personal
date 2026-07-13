@@ -218,11 +218,19 @@
     <section id="vista-historial" class="vista oculto">
       <section class="tarjeta">
         <h2>Historial de Presentaciones</h2>
-        <div class="fila-form">
-          <label for="historial-filtro-obligacion">Obligación</label>
-          <select id="historial-filtro-obligacion">
-            <!-- Las opciones se arman dinámicamente desde js/historial.js, una por obligación del catálogo -->
-          </select>
+        <div class="fila-form-filtros-pagos">
+          <div class="fila-form">
+            <label for="historial-filtro-obligacion">Obligación</label>
+            <select id="historial-filtro-obligacion">
+              <!-- Las opciones se arman dinámicamente desde js/historial.js, una por obligación del catálogo -->
+            </select>
+          </div>
+          <div class="fila-form">
+            <label for="historial-filtro-anio">Año</label>
+            <select id="historial-filtro-anio">
+              <!-- Se arma dinámicamente desde js/historial.js: desde 2022 hasta el año actual -->
+            </select>
+          </div>
         </div>
         <div id="historial-mensaje" class="mensaje mensaje-error oculto"></div>
         <div id="historial-grupos">
