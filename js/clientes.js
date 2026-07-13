@@ -55,6 +55,13 @@ let panelRg90Visible = true;
 // del cliente a editar.
 let ignorarProximaCarga = false;
 
+// Id (uuid) del usuario logueado, para preseleccionar su propio perfil como
+// Responsable al abrir el formulario de un cliente NUEVO (ver
+// abrirFormularioNuevo). Queda null si todavía no se pudo leer la sesión, o
+// si su perfil no está en perfilesCache por algún motivo; en ese caso el
+// <select> simplemente arranca sin preselección, como antes.
+let usuarioActualId = null;
+
 // --- Mensajes para el usuario --------------------------------------------
 
 function mostrarMensaje(texto, tipo = 'exito', permanente = false) {
@@ -119,6 +126,7 @@ async function cargarClientes() {
   // formulario (si falla, dejamos el select con el fallback correspondiente
   // en vez de bloquear toda la pantalla).
   await cargarPerfiles();
+  await cargarUsuarioActual();
 
   abrirFormularioNuevo();
 }
@@ -131,6 +139,23 @@ async function cargarPerfiles() {
   } catch (error) {
     console.error('Error al cargar la lista de responsables:', error);
     perfilesCache = [];
+  }
+}
+
+// Lee el uuid del usuario actualmente logueado (mismo mecanismo que usa
+// js/auth.js con supabase.auth.getSession()) para poder preseleccionarlo
+// como Responsable al crear un cliente nuevo. No es indispensable: si falla
+// o todavía no hay sesión (esta pantalla se autoinvoca al cargar el script,
+// antes del login, ver comentario de arriba de cargarClientes), el
+// formulario simplemente arranca sin preselección.
+async function cargarUsuarioActual() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    usuarioActualId = data?.session?.user?.id ?? null;
+  } catch (error) {
+    console.error('Error al leer el usuario logueado:', error);
+    usuarioActualId = null;
   }
 }
 
@@ -188,11 +213,23 @@ function dibujarOpcionesResponsable() {
 
 // Selecciona, dentro de las opciones ya armadas por dibujarOpcionesResponsable,
 // la que corresponde al responsable actual de un cliente que se está
-// editando. Si el texto guardado no coincide con el nombre de ningún perfil
-// existente (responsable de texto libre cargado antes de este cambio, o un
-// perfil que se borró/renombró después), no lo perdemos silenciosamente:
-// se agrega como una opción extra, ya seleccionada.
-function seleccionarResponsable(responsableTexto) {
+// editando. Prioridad: 1) responsable_id guardado, si coincide con algún
+// perfil de la lista (caso normal, cliente ya asignado a un uuid real);
+// 2) si no hay responsable_id (cliente viejo sin backfill exitoso) o no
+// coincide con ningún perfil actual, cae al mismo fallback de siempre por
+// texto libre (responsableTexto) -- si tampoco coincide con el nombre de
+// ningún perfil (texto libre viejo, o el perfil se borró/renombró), se
+// agrega como opción extra seleccionada en vez de perderse silenciosamente.
+function seleccionarResponsable(responsableId, responsableTexto) {
+  if (responsableId) {
+    const coincidenciaPorId = [...elClienteResponsable.options]
+      .find((opcion) => opcion.value === responsableId);
+    if (coincidenciaPorId) {
+      elClienteResponsable.value = coincidenciaPorId.value;
+      return;
+    }
+  }
+
   if (!responsableTexto) return;
 
   const coincidencia = [...elClienteResponsable.options]
@@ -225,6 +262,17 @@ function abrirFormularioNuevo() {
   // editar un cliente con un responsable "extra" (ver seleccionarResponsable),
   // esa opción no debe quedar pegada en el formulario de alta.
   dibujarOpcionesResponsable();
+  // Cliente NUEVO: preseleccionamos el perfil del usuario logueado (sigue
+  // siendo editable, cualquiera puede cambiarlo a otro responsable antes de
+  // guardar -- ver docs/PEDIDOS_PENDIENTES.md, "Cartera por responsable").
+  // Si no hay usuario logueado todavía o su perfil no está en la lista, el
+  // <select> queda con la selección por defecto del navegador (la primera
+  // opción), como pasaba antes de este cambio.
+  if (usuarioActualId) {
+    const opcionPropia = [...elClienteResponsable.options]
+      .find((opcion) => opcion.value === usuarioActualId);
+    if (opcionPropia) opcionPropia.selected = true;
+  }
   elClienteRuc.focus();
 }
 
@@ -245,7 +293,7 @@ function abrirFormularioEdicion(cliente, honorario) {
   elClienteHonorarioAnual.value = honorario?.monto_anual ?? '';
 
   dibujarOpcionesResponsable();
-  seleccionarResponsable(cliente.responsable);
+  seleccionarResponsable(cliente.responsable_id, cliente.responsable);
 
   elFormTitulo.textContent = `Editar Cliente: ${cliente.razon_social}`;
   dibujarCheckboxesObligaciones(obligacionesDelClienteEnEdicion);
@@ -277,17 +325,26 @@ elForm.addEventListener('submit', async (evento) => {
   }
 
   // El <select> guarda el id del perfil (o un marcador "__actual__" para el
-  // fallback de texto libre) en .value, pero lo que hay que guardar en
-  // clientes.responsable es el NOMBRE visible, no el id -- la columna sigue
-  // siendo texto libre (ver seleccionarResponsable/dibujarOpcionesResponsable).
+  // fallback de texto libre) en .value. Seguimos guardando el NOMBRE visible
+  // en clientes.responsable (texto libre, lo siguen leyendo otras pantallas
+  // sin tocar) y AHORA además el uuid en clientes.responsable_id cuando la
+  // opción elegida corresponde a un perfil real -- si quedó seleccionada la
+  // opción de fallback "__actual__" (responsable de texto libre viejo sin
+  // perfil que lo respalde) o no hay ninguna opción real cargada, guardamos
+  // null: no hay un perfil real al que referenciar.
   const opcionResponsable = elClienteResponsable.selectedOptions[0];
   const responsableTexto = opcionResponsable ? opcionResponsable.textContent.trim() : '';
+  const responsableIdSeleccionado =
+    opcionResponsable && opcionResponsable.value && opcionResponsable.value !== '__actual__'
+      ? opcionResponsable.value
+      : null;
 
   const datosCliente = {
     ruc: elClienteRuc.value.trim(),
     razon_social: elClienteRazonSocial.value.trim(),
     terminacion_ruc: elClienteTerminacionRuc.value === '' ? null : Number(elClienteTerminacionRuc.value),
     responsable: responsableTexto,
+    responsable_id: responsableIdSeleccionado,
     clave_marangatu: elClienteClaveMarangatu.value.trim() || null,
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
   };
