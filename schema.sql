@@ -224,12 +224,19 @@ create table if not exists public.obligaciones (
 );
 
 comment on table  public.obligaciones is
-    'Catálogo FIJO de obligaciones fiscales (5 filas precargadas, no se insertan/editan desde la app). Ver INSERT de carga inicial más abajo.';
+    'Catálogo FIJO de obligaciones fiscales (9 filas precargadas, no se insertan/editan desde la app). Ver INSERT de carga inicial más abajo.';
 comment on column public.obligaciones.periodicidad is
-    'mensual = vence todos los meses (IVA). anual = vence una vez al año (IRE SIMPLE/GENERAL, ESTADO FINANCIERO). manual = nunca se genera solo; se crea a mano cuando corresponde (IDU).';
+    'mensual = vence todos los meses (IVA, RG 90 Mensual). anual = vence una vez al año (IRE SIMPLE/GENERAL, ESTADO FINANCIERO, IRP-RSP/RGC, RG 90 Anual). manual = nunca se genera solo; se crea a mano cuando corresponde (IDU).';
 
 -- Carga inicial (idempotente: si se corre de nuevo, actualiza nombre y
 -- periodicidad en vez de duplicar filas).
+-- RG 90 (Registro de Comprobantes, Resolución General N° 90/2021 - DNIT,
+-- Sistema Marangatu): dos variantes, cada una con su propia regla de
+-- vencimiento (ver calendario-logica.js). En Marangatu se identifican como
+-- "código 955" (mensual, contribuyentes de IVA) y "código 956" (anual,
+-- contribuyentes de IRP-RSP que NO son de IVA) — se dejan como comentario
+-- acá porque `codigo` en esta tabla sigue la convención mnemónica del
+-- resto del catálogo (IVA, IRE_SIMPLE, etc.), no los códigos de Marangatu.
 insert into public.obligaciones (codigo, nombre, periodicidad) values
     ('IVA',               'IVA',                'mensual'),
     ('IRE_SIMPLE',        'IRE SIMPLE',          'anual'),
@@ -237,7 +244,9 @@ insert into public.obligaciones (codigo, nombre, periodicidad) values
     ('ESTADO_FINANCIERO', 'ESTADO FINANCIERO',   'anual'),
     ('IRP_RSP',           'IRP-RSP',             'anual'),
     ('IRP_RGC',           'IRP-RGC',             'anual'),
-    ('IDU',               'IDU',                'manual')
+    ('IDU',               'IDU',                'manual'),
+    ('RG90_MENSUAL',      'RG 90 Mensual',       'mensual'),
+    ('RG90_ANUAL',        'RG 90 Anual',         'anual')
 on conflict (codigo) do update
     set nombre       = excluded.nombre,
         periodicidad = excluded.periodicidad;
@@ -388,6 +397,10 @@ create index if not exists idx_calendario_obligacion_id
 --    que es la regla general, esto da los meses de siempre):
 --      - IVA               (mensual): mismo mes que el período declarado
 --                                     (no depende del cierre fiscal).
+--      - RG 90 MENSUAL     (mensual): mismo día/mes que IVA (mismo cálculo,
+--                                     código 955 en Marangatu). Para
+--                                     contribuyentes de IVA + IRP-RSP o
+--                                     IVA + IRE SIMPLE.
 --      - IRE SIMPLE        (anual):   3er mes posterior al cierre.
 --                                     Cierre 31/12 => vence en MARZO.
 --      - IRP-RSP           (anual):   3er mes posterior al cierre, igual
@@ -400,6 +413,17 @@ create index if not exists idx_calendario_obligacion_id
 --                                     Cierre 31/12 => vence en ABRIL.
 --      - ESTADO FINANCIERO (anual):   mismo vencimiento que IRE GENERAL
 --                                     (se presentan juntos, mismo mes/día).
+--      - RG 90 ANUAL       (anual):   2do mes posterior al cierre (código
+--                                     956 en Marangatu). Cierre 31/12 =>
+--                                     vence en FEBRERO. Para contribuyentes
+--                                     de IRP-RSP que NO son de IVA. El día
+--                                     dentro del mes usa la misma tabla de
+--                                     terminación de RUC que el resto: es
+--                                     una asunción documentada (no hay
+--                                     tabla propia publicada por Marangatu
+--                                     para esta obligación), confirmada con
+--                                     el usuario, a ajustar si en la
+--                                     práctica no coincide.
 --      - IDU               (manual):  NO se genera automáticamente en
 --                                     ningún período. Se crea a mano cuando
 --                                     el contador confirma que el cliente

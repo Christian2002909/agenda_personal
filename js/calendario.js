@@ -117,7 +117,7 @@ async function cargarCalendario() {
     ] = await Promise.all([
       supabaseCalendario
         .from('calendario_vencimientos')
-        .select('cliente_id, obligacion_id, periodo, fecha_vencimiento, clientes(razon_social, cierre_fiscal_mes), obligaciones(periodicidad)')
+        .select('cliente_id, obligacion_id, periodo, fecha_vencimiento, clientes(razon_social, cierre_fiscal_mes), obligaciones(nombre, periodicidad)')
         .order('fecha_vencimiento', { ascending: true }),
       supabaseCalendario
         .from('presentaciones')
@@ -199,6 +199,7 @@ function dibujarTablaCalendario(filas) {
 
     tr.innerHTML = `
       <td>${escaparHtmlCalendario(fila.clientes?.razon_social)}</td>
+      <td>${escaparHtmlCalendario(fila.obligaciones?.nombre)}</td>
       <td>${formatearPeriodoVisible(fila.periodo, fila.obligaciones?.periodicidad)}</td>
       <td class="${estaVencido ? 'fecha-vencida' : ''}">${formatearFechaVisible(fila.fecha_vencimiento)}</td>
     `;
