@@ -662,7 +662,7 @@ async function exportarClientesAExcel() {
       return filaExcel;
     });
 
-    descargarComoExcel(`clientes_${new Date().toISOString().slice(0, 10)}.xlsx`, [
+    await descargarComoExcel(`clientes_${new Date().toISOString().slice(0, 10)}.xlsx`, [
       { nombre: 'Clientes', filas: filasExcel },
     ]);
   } catch (error) {

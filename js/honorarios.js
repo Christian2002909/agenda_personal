@@ -1347,7 +1347,7 @@ async function exportarHonorariosAExcel() {
       };
     });
 
-    descargarComoExcel(`honorarios_${new Date().toISOString().slice(0, 10)}.xlsx`, [
+    await descargarComoExcel(`honorarios_${new Date().toISOString().slice(0, 10)}.xlsx`, [
       { nombre: 'Honorarios', filas: filasHonorarios },
       { nombre: 'Historial de Pagos', filas: filasPagos },
     ]);
