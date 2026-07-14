@@ -299,14 +299,6 @@ table.tabla-honorarios-grilla th {
   font-size: 11px;
 }
 
-/* Las celdas de mes reutilizan .celda-historial-toggle (mismo diseño que
-   Historial): el padding vive en el <label> de adentro, no acá, para que
-   no quede doble relleno -- mismo criterio que .tabla-historial-mensual/
-   .tabla-presentaciones. */
-.tabla-honorarios-grilla td.celda-historial {
-  padding: 0;
-}
-
 /* Mismo título "VENCIMIENTO N - FECHA D" que .grupo-vencimiento-titulo,
    pero como <td colspan> dentro de la tabla de Honorarios (esa es un
    <table>, no permite un <div> de encabezado suelto como Presentaciones). */
@@ -654,6 +646,22 @@ table.tabla-honorarios-grilla th {
 .fecha-vencida {
   color: var(--color-vencido);
   font-weight: 600;
+}
+
+/* Celdas de un solo checkbox de la grilla mensual de Honorarios (12
+   columnas Ene-Dic) -- padding bien angosto a propósito, ya que con 12
+   columnas repetidas el padding normal de .tabla-clientes td (10px 8px)
+   hacía la tabla mucho más ancha de lo necesario para lo que en realidad
+   es solo un checkbox por celda. */
+.tabla-clientes td.celda-checkbox {
+  text-align: center;
+  padding: 6px 4px;
+}
+
+.celda-checkbox input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
 
 /* Columna "Acciones" de Honorarios: un único <select> "Acciones ▾" con

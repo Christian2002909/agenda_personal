@@ -158,14 +158,6 @@ function formatearFechaVisibleHonorarios(fechaISO) {
   return `${dia}/${mes}/${anio}`;
 }
 
-// "dd/mm" (sin año) para las celdas angostas de la grilla mensual de
-// Honorarios -- mismo formato que ya usa formatearFechaCortaHistorial.
-function formatearFechaCortaHonorarios(fecha) {
-  const dia = String(fecha.getDate()).padStart(2, '0');
-  const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-  return `${dia}/${mes}`;
-}
-
 // "dic. 2026" -- usado en el badge de "Deuda congelada" para la fecha de
 // acuerdo (fecha_acuerdo es un date "yyyy-mm-dd", sin hora).
 function formatearMesAnioCorto(fechaISO) {
@@ -598,12 +590,8 @@ const HONORARIOS_COLSPAN = 15;
 // D"), mismo criterio que Presentaciones/Historial -- reemplaza a la vieja
 // tabla plana con columnas Cuota Mensual/Cuota Anual/Estado/¿Pagó? y a la
 // sección aparte "Cuota Anual" (ver más abajo: la columna Anual absorbe su
-// checkbox de activación + balance). Las celdas de mes reutilizan el mismo
-// diseño que Historial (checkbox + fecha corta, verde/rojo/gris según esté
-// pagado/vencido/todavía no vence -- mismas clases .celda-historial-*),
-// confirmado por el usuario para que las dos pantallas se vean iguales; la
-// fecha usada es el mismo día por terminación de RUC que ya agrupa esta
-// tabla (DIA_POR_TERMINACION_RUC), no una fecha de vencimiento fiscal real.
+// checkbox de activación + balance). No se muestra fecha de vencimiento en
+// ninguna celda (confirmado por el usuario) -- eso queda solo en la Ficha.
 //
 // Clientes sin terminación de RUC cargada NO se ocultan (a diferencia de
 // Presentaciones): es información de dinero, esconder un cliente por un
@@ -647,18 +635,6 @@ function dibujarTablaHonorarios() {
     return a - b;
   });
 
-  // Mismo día que "vence" para cada terminación de RUC (DIA_POR_TERMINACION_RUC,
-  // el mismo que ya usan Presentaciones/Historial), reutilizado acá para que
-  // la celda de cada mes tenga una fecha real y el mismo color según esté
-  // pagada (verde), vencida sin pagar (rojo) o todavía no corresponda
-  // (gris) -- mismas clases .celda-historial-* que ya usa Historial, para
-  // que el diseño quede igual (confirmado por el usuario). A diferencia de
-  // Historial, clickear la celda NO tilda directo: abre el formulario de
-  // pago (ver el listener de "change" de checkbox-grilla-honorarios), así
-  // que se necesitan los datos de siempre en el checkbox.
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-
   for (const clave of clavesOrdenadas) {
     const clientesDelGrupo = porTerminacion.get(clave)
       .sort((a, b) => a.razon_social.localeCompare(b.razon_social));
@@ -671,10 +647,6 @@ function dibujarTablaHonorarios() {
     filaTitulo.innerHTML = `<td colspan="${HONORARIOS_COLSPAN}" class="celda-titulo-grupo-honorarios">${tituloGrupo}</td>`;
     elTablaHonorariosBody.appendChild(filaTitulo);
 
-    // Sin terminación de RUC cargada no hay día real que usar -- cae al 1°
-    // de cada mes solo para poder pintar algo, ver comentario de la función.
-    const diaDelMes = clave === CLAVE_SIN_TERMINACION ? 1 : DIA_POR_TERMINACION_RUC[clave];
-
     for (const cliente of clientesDelGrupo) {
       const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
       const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
@@ -686,29 +658,20 @@ function dibujarTablaHonorarios() {
           celdasMeses.push('<td class="celda-obligacion-na">—</td>');
           continue;
         }
-        const fechaVencimiento = new Date(anioActual, mes - 1, diaDelMes);
         const periodoISO = formatearFechaISO(new Date(anioActual, mes - 1, 1));
         const pagoDelMes = pagosCache.some(
           (p) => p.cliente_id === cliente.id && p.tipo_honorario === 'mensual' && p.periodo === periodoISO
         );
-        const estado = pagoDelMes ? 'presentado' : (fechaVencimiento < hoy ? 'vencido' : 'pendiente');
-        const titulo = pagoDelMes
-          ? `Pagado (vencía ${formatearFechaCortaHonorarios(fechaVencimiento)})`
-          : `${estado === 'vencido' ? 'No pagado (vencido)' : 'Todavía no vence'} -- ${formatearFechaCortaHonorarios(fechaVencimiento)}`;
-
         celdasMeses.push(`
-          <td class="celda-historial celda-historial-${estado}">
-            <label class="celda-historial-toggle celda-historial-toggle-compacta" title="${escaparHtmlHonorarios(titulo)}">
-              <input
-                type="checkbox"
-                class="checkbox-grilla-honorarios"
-                data-cliente-id="${cliente.id}"
-                data-mes-pago="${mes}"
-                data-anio-pago="${anioActual}"
-                ${pagoDelMes ? 'checked' : ''}
-              />
-              <span>${formatearFechaCortaHonorarios(fechaVencimiento)}</span>
-            </label>
+          <td class="celda-checkbox">
+            <input
+              type="checkbox"
+              class="checkbox-grilla-honorarios"
+              data-cliente-id="${cliente.id}"
+              data-mes-pago="${mes}"
+              data-anio-pago="${anioActual}"
+              ${pagoDelMes ? 'checked' : ''}
+            />
           </td>
         `);
       }
