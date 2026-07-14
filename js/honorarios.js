@@ -64,8 +64,8 @@
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente, DIA_POR_TERMINACION_RUC } = require('./js/calendario-logica.js');
 const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
-// Solo para exportar Historial de Pagos (ver descargarHistorialPagosExcel más
-// abajo) -- a diferencia de la Ficha (PDF vía window.print()), esto sí
+// Solo para la Ficha de un cliente en Excel (ver descargarFichaClienteExcel
+// más abajo) -- a diferencia de la Ficha en PDF (vía window.print()), esto sí
 // necesita exceljs. Ver comentario largo en js/excel-utils.js sobre por qué
 // esta librería nunca debe requerirse sin try/catch a nivel de archivo: acá
 // no aplica porque excel-utils.js ya se protege a sí mismo internamente
@@ -80,12 +80,8 @@ const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
 const elGruposHonorarios = document.getElementById('tabla-honorarios-grupos');
 const elSinHonorarios = document.getElementById('sin-honorarios');
 
-const elPagosFiltroAnio = document.getElementById('pagos-filtro-anio');
-const elPagosFiltroMes = document.getElementById('pagos-filtro-mes');
 const elTablaPagosBody = document.getElementById('tabla-pagos-body');
 const elSinPagos = document.getElementById('sin-pagos');
-const elBtnHistorialExcel = document.getElementById('btn-historial-pagos-excel');
-const elBtnHistorialPdf = document.getElementById('btn-historial-pagos-pdf');
 
 const elFichaImprimir = document.getElementById('ficha-pago-imprimir');
 const elFichaContenido = document.getElementById('ficha-pago-contenido');
@@ -379,7 +375,6 @@ async function cargarHonorarios() {
     poblarFiltroCartera();
 
     dibujarTablaHonorarios();
-    poblarFiltroAnioPagos();
     dibujarTablaPagos();
 
     if (advertencias.length > 0) {
@@ -751,7 +746,6 @@ function dibujarTablaHonorarios() {
         <td class="celda-acciones-honorarios">
           <select class="selector-acciones-honorarios" data-acciones-cliente-id="${cliente.id}">
             <option value="" selected>Acciones ▾</option>
-            <option value="ficha" ${honorario ? '' : 'disabled'}>Ficha</option>
             <option value="editar-cuota">Editar cuota</option>
             <option value="detalle">Detalle</option>
             <option value="deuda-congelada" ${honorario ? '' : 'disabled'}>Deuda congelada</option>
@@ -943,9 +937,13 @@ function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null, t
       </div>`
     : `<input type="hidden" class="campo-pago-tipo" value="${tipoInicial}" />`;
 
-  const montoInicial = pagoExistente
-    ? pagoExistente.monto_pagado
-    : ((tipoInicial === 'mensual' ? honorario.monto_mensual : honorario.monto_anual) || '');
+  // A propósito NO se precarga con el monto pactado (honorario.monto_mensual/
+  // monto_anual) cuando es un pago nuevo -- el usuario pidió escribir él
+  // mismo lo que está cobrando cada vez, porque un mes puede pagar menos y
+  // otro de más para ponerse al día, y un monto precargado invita a guardar
+  // sin fijarse. Al EDITAR un pago ya cargado sí se muestra lo que
+  // realmente se guardó.
+  const montoInicial = pagoExistente ? pagoExistente.monto_pagado : '';
 
   const fechaInicial = pagoExistente ? pagoExistente.fecha_pago : formatearFechaISO(new Date());
   const reciboInicial = pagoExistente?.numero_recibo || '';
@@ -1004,20 +1002,17 @@ function abrirFormularioPagoParaPeriodo(clienteId, tipo, fechaPeriodo, pagoExist
 }
 
 // Al cambiar el tipo de cuota en el formulario (solo posible si el cliente
-// tiene las dos), actualizamos el monto sugerido y los campos de período.
+// tiene las dos), actualizamos los campos de período -- el monto NO se toca
+// (ver comentario en construirFormularioPagoHtml): si el usuario ya escribió
+// algo, cambiar de tipo no debe pisárselo.
 function actualizarCamposSegunTipoInline(selectTipo) {
   const form = selectTipo.closest('form.form-pago-inline');
   if (!form) return;
 
   const clienteId = Number(form.dataset.clienteId);
   const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
-  const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
   const tipo = selectTipo.value;
   const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
-
-  const montoInput = form.querySelector('.campo-pago-monto');
-  const montoSugerido = tipo === 'mensual' ? honorario?.monto_mensual : honorario?.monto_anual;
-  if (montoInput && montoSugerido) montoInput.value = formatearConPuntos(String(montoSugerido));
 
   const contenedorPeriodo = form.querySelector('.campo-pago-periodo-contenedor');
   if (contenedorPeriodo) {
@@ -1538,22 +1533,18 @@ elGruposHonorarios.addEventListener('change', (evento) => {
     return;
   }
 
-  // Desplegable "Acciones" de la columna de la tabla (incluye "Ficha",
-  // reemplaza al botón suelto que tenía antes, para que la columna quede
-  // más angosta). Cada elección dispara la misma función que disparaba su
-  // botón/opción equivalente, y el selector vuelve solo al placeholder
-  // "Acciones ▾" después.
+  // Desplegable "Acciones" de la columna de la tabla. Cada elección dispara
+  // la misma función que disparaba su botón/opción equivalente, y el
+  // selector vuelve solo al placeholder "Acciones ▾" después. La Ficha ya
+  // no vive acá -- se genera desde la fila de cada cliente en Historial de
+  // Pagos (ver el listener de elTablaPagosBody más abajo).
   const selectorAcciones = evento.target.closest('select[data-acciones-cliente-id]');
   if (selectorAcciones) {
     const clienteId = Number(selectorAcciones.dataset.accionesClienteId);
     const accion = selectorAcciones.value;
     selectorAcciones.value = '';
 
-    if (accion === 'ficha') {
-      const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
-      const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
-      if (cliente && honorario) generarFichaPago(cliente, honorario);
-    } else if (accion === 'editar-cuota') abrirFormularioEditarCuota(clienteId);
+    if (accion === 'editar-cuota') abrirFormularioEditarCuota(clienteId);
     else if (accion === 'detalle') abrirDetalleCliente(clienteId);
     else if (accion === 'deuda-congelada') abrirFormularioCongelarDeuda(clienteId);
     else if (accion === 'otros-gastos') abrirFormularioOtrosGastos(clienteId);
@@ -1670,173 +1661,134 @@ elGruposHonorarios.addEventListener('submit', async (evento) => {
   }
 });
 
-// --- Historial de pagos: filtro por período y edición en línea -----------
+// --- Historial de Pagos: resumen por cliente ------------------------------
+// Un cliente, una fila -- no un listado de pagos sueltos. Muestra cuánto es
+// (y cuánto debe) su cuota mensual/anual, más el monto pendiente de deuda
+// congelada y de otros gastos. El detalle pago por pago (forma de pago, N°
+// de recibo, fecha de pago, período) queda solo en la Ficha descargable de
+// cada cliente -- los dos botones de la última columna, PDF (reutiliza el
+// mismo modal de previsualización que "Ficha" tenía antes en Honorarios por
+// Cliente) o Excel.
+function construirCeldaCuotaResumen(honorario, cliente, tipoHonorario) {
+  const monto = tipoHonorario === 'mensual' ? honorario?.monto_mensual : honorario?.monto_anual;
+  if (!monto) return '<span class="texto-ayuda">—</span>';
 
-// Puebla el filtro de año con los años que realmente tienen pagos
-// registrados (según pagos_honorarios.periodo), para no mostrar años
-// vacíos en el desplegable.
-function poblarFiltroAnioPagos() {
-  if (!elPagosFiltroAnio) return;
-
-  const seleccionActual = elPagosFiltroAnio.value;
-  const aniosDisponibles = [...new Set(pagosCache.map((pago) => pago.periodo.split('-')[0]))].sort((a, b) => b - a);
-
-  elPagosFiltroAnio.innerHTML = '<option value="">Todos</option>'
-    + aniosDisponibles.map((anio) => `<option value="${anio}">${anio}</option>`).join('');
-
-  if (aniosDisponibles.includes(seleccionActual)) elPagosFiltroAnio.value = seleccionActual;
+  const saldo = calcularSaldoPorTipo(honorario, cliente, tipoHonorario) ?? 0;
+  const resultado = { estado: saldo > 0 ? 'debe' : 'al_dia', saldoPendiente: saldo };
+  return `${formatearGuaranies(monto)} ${dibujarBadgeEstado(resultado)}`;
 }
 
-// Filtra por período (año, y opcionalmente mes) -- para la cuota anual el
-// período siempre cae en enero (1° de enero del ejercicio), así que un
-// filtro de mes distinto de "Todos"/Enero naturalmente no muestra pagos
-// anuales, lo cual es esperable.
-function filtrarPagosParaTabla() {
-  const anio = elPagosFiltroAnio ? elPagosFiltroAnio.value : '';
-  const mes = elPagosFiltroMes ? elPagosFiltroMes.value : '';
-
-  return pagosCache.filter((pago) => {
-    const [anioPago, mesPago] = pago.periodo.split('-');
-    if (anio && anioPago !== anio) return false;
-    if (mes && Number(mesPago) !== Number(mes)) return false;
-    return true;
-  });
+function construirFilaResumenClienteHtml(cliente, honorario) {
+  return `
+    <tr>
+      <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
+      <td>${construirCeldaCuotaResumen(honorario, cliente, 'mensual')}</td>
+      <td>${construirCeldaCuotaResumen(honorario, cliente, 'anual')}</td>
+      <td>${dibujarBadgesDeudaCongelada(cliente.id) || '<span class="texto-ayuda">—</span>'}</td>
+      <td>${dibujarBadgeOtrosGastos(cliente.id) || '<span class="texto-ayuda">—</span>'}</td>
+      <td class="celda-ficha-resumen">
+        <button type="button" class="boton boton-chico" data-ficha-pdf-cliente="${cliente.id}">PDF</button>
+        <button type="button" class="boton boton-chico" data-ficha-excel-cliente="${cliente.id}">Excel</button>
+      </td>
+    </tr>
+  `;
 }
-
-if (elPagosFiltroAnio) elPagosFiltroAnio.addEventListener('change', dibujarTablaPagos);
-if (elPagosFiltroMes) elPagosFiltroMes.addEventListener('change', dibujarTablaPagos);
 
 function dibujarTablaPagos() {
   elTablaPagosBody.innerHTML = '';
 
-  const pagosFiltrados = filtrarPagosParaTabla();
+  const clientesConHonorario = honorariosCache
+    .map((honorario) => ({ honorario, cliente: clientesCacheHonorarios.find((c) => c.id === honorario.cliente_id) }))
+    .filter(({ cliente }) => cliente)
+    .sort((a, b) => a.cliente.razon_social.localeCompare(b.cliente.razon_social));
 
-  if (pagosFiltrados.length === 0) {
+  if (clientesConHonorario.length === 0) {
     elSinPagos.classList.remove('oculto');
     return;
   }
   elSinPagos.classList.add('oculto');
 
-  for (const pago of pagosFiltrados) {
-    const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
-    elTablaPagosBody.insertAdjacentHTML('beforeend', construirFilaPagoHtml(pago, cliente));
+  for (const { cliente, honorario } of clientesConHonorario) {
+    elTablaPagosBody.insertAdjacentHTML('beforeend', construirFilaResumenClienteHtml(cliente, honorario));
   }
 }
 
-// --- Exportar Historial de Pagos (Excel / PDF) ----------------------------
-// Exporta lo que esté FILTRADO en pantalla (mismo Año/Mes que la tabla),
-// no todo pagosCache -- así el archivo coincide siempre con lo que se está
-// viendo. El PDF reutiliza el mismo modal de previsualización que la Ficha
-// de un cliente (#ficha-pago-imprimir), armando una tabla genérica en vez
-// de la ficha mensual/anual de un cliente puntual.
+// Ficha de un cliente en Excel: mismos datos que la Ficha en PDF
+// (construirTablaMensualFicha/construirTablaAnualFicha, más abajo), pero
+// como filas de planilla en vez de una tabla para imprimir.
+async function descargarFichaClienteExcel(cliente, honorario) {
+  const anioActual = new Date().getFullYear();
+  const hojas = [];
 
-async function descargarHistorialPagosExcel() {
-  const pagosFiltrados = filtrarPagosParaTabla();
-  if (pagosFiltrados.length === 0) {
-    mostrarMensajeHonorarios('No hay pagos para exportar con este filtro.', 'error');
+  if (honorario.monto_mensual) {
+    const filas = [];
+    for (let mes = 1; mes <= 12; mes += 1) {
+      const periodoISO = formatearFechaISO(new Date(anioActual, mes - 1, 1));
+      const pago = pagosCache.find(
+        (p) => p.cliente_id === cliente.id && p.tipo_honorario === 'mensual' && p.periodo === periodoISO
+      );
+      filas.push({
+        Mes: NOMBRES_MES_COMPLETOS[mes - 1],
+        Año: anioActual,
+        'Monto Gs.': Number(honorario.monto_mensual),
+        'Forma de Pago': pago ? formatearFormaPago(pago.forma_pago) : '',
+        'N° Recibo': pago?.numero_recibo ?? '',
+        'Fecha de Pago': pago?.fecha_pago ?? '',
+      });
+    }
+    hojas.push({ nombre: 'Cuota Mensual', filas });
+  }
+
+  if (honorario.monto_anual) {
+    const periodoISO = formatearFechaISO(new Date(anioActual, 0, 1));
+    const ultimoPago = pagosCache.find(
+      (p) => p.cliente_id === cliente.id && p.tipo_honorario === 'anual' && p.periodo === periodoISO
+    );
+    hojas.push({
+      nombre: 'Cuota Anual',
+      filas: [{
+        Obligación: 'IVA / IRE',
+        Año: anioActual,
+        'Monto Gs.': Number(honorario.monto_anual),
+        'Forma de Pago': ultimoPago ? formatearFormaPago(ultimoPago.forma_pago) : '',
+        'N° Recibo': ultimoPago?.numero_recibo ?? '',
+        'Fecha de Pago': ultimoPago?.fecha_pago ?? '',
+      }],
+    });
+  }
+
+  if (hojas.length === 0) {
+    mostrarMensajeHonorarios('Este cliente no tiene ninguna cuota configurada.', 'error');
     return;
   }
 
-  const filas = pagosFiltrados.map((pago) => {
-    const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
-    return {
-      Cliente: cliente?.razon_social ?? '',
-      'Corresponde a': pago.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual',
-      'Monto Gs.': Number(pago.monto_pagado),
-      'Forma de Pago': formatearFormaPago(pago.forma_pago),
-      'N° Recibo': pago.numero_recibo ?? '',
-      'Fecha de Pago': pago.fecha_pago,
-      Período: pago.periodo,
-    };
-  });
-
+  const nombreArchivo = `ficha-${cliente.razon_social.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.xlsx`;
   try {
-    await descargarComoExcel('historial-de-pagos.xlsx', [{ nombre: 'Historial de Pagos', filas }]);
+    await descargarComoExcel(nombreArchivo, hojas);
   } catch (error) {
-    console.error('Error al exportar el historial de pagos a Excel:', error);
+    console.error('Error al exportar la ficha del cliente a Excel:', error);
     const mensaje = error instanceof ErrorLibreriaExcelNoDisponible ? error.message : 'No se pudo generar el archivo Excel.';
     mostrarMensajeHonorarios(mensaje, 'error');
   }
 }
 
-function generarFichaHistorialPagos() {
-  const pagosFiltrados = filtrarPagosParaTabla();
-  if (pagosFiltrados.length === 0) {
-    mostrarMensajeHonorarios('No hay pagos para exportar con este filtro.', 'error');
-    return;
-  }
-
-  const nombreEstudio = configuracionEstudio?.nombre_estudio || 'Estudio Contable';
-  const direccion = configuracionEstudio?.direccion || '';
-  const telefono = configuracionEstudio?.telefono || '';
-  const logoHtml = configuracionEstudio?.logo_base64
-    ? `<img src="${configuracionEstudio.logo_base64}" alt="Logo del estudio" class="ficha-logo" />`
-    : '';
-
-  const filasHtml = pagosFiltrados
-    .map((pago) => {
-      const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
-      return `
-        <tr>
-          <td>${escaparHtmlHonorarios(cliente?.razon_social ?? '')}</td>
-          <td>${pago.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual'}</td>
-          <td class="num">${Number(pago.monto_pagado).toLocaleString('es-PY')}</td>
-          <td>${formatearFormaPago(pago.forma_pago)}</td>
-          <td>${pago.numero_recibo ? escaparHtmlHonorarios(pago.numero_recibo) : ''}</td>
-          <td>${formatearFechaVisibleHonorarios(pago.fecha_pago)}</td>
-          <td>${formatearFechaVisibleHonorarios(pago.periodo)}</td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  elFichaContenido.innerHTML = `
-    <div class="ficha-membrete">
-      <div>
-        <h1>${escaparHtmlHonorarios(nombreEstudio)}</h1>
-        ${direccion ? `<p>${escaparHtmlHonorarios(direccion)}</p>` : ''}
-        ${telefono ? `<p>Tel: ${escaparHtmlHonorarios(telefono)}</p>` : ''}
-      </div>
-      ${logoHtml}
-    </div>
-    <div class="ficha-cliente-banner">Historial de Pagos</div>
-    <table class="ficha-tabla">
-      <thead>
-        <tr>
-          <th>Cliente</th><th>Corresponde a</th><th>Monto Gs.</th><th>Forma de Pago</th>
-          <th>Recibo N°</th><th>Fecha de Pago</th><th>Período</th>
-        </tr>
-      </thead>
-      <tbody>${filasHtml}</tbody>
-    </table>
-  `;
-  elFichaImprimir.classList.remove('oculto');
-}
-
-if (elBtnHistorialExcel) elBtnHistorialExcel.addEventListener('click', descargarHistorialPagosExcel);
-if (elBtnHistorialPdf) elBtnHistorialPdf.addEventListener('click', generarFichaHistorialPagos);
-
 elTablaPagosBody.addEventListener('click', (evento) => {
-  const botonEditarPago = evento.target.closest('button[data-editar-pago-id]');
-  if (botonEditarPago) {
-    const filaPago = evento.target.closest('tr[data-fila-pago-id]');
-    if (filaPago) abrirEdicionPagoEnFila(filaPago, Number(botonEditarPago.dataset.editarPagoId));
+  const botonFichaPdf = evento.target.closest('button[data-ficha-pdf-cliente]');
+  if (botonFichaPdf) {
+    const clienteId = Number(botonFichaPdf.dataset.fichaPdfCliente);
+    const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+    const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+    if (cliente && honorario) generarFichaPago(cliente, honorario);
     return;
   }
 
-  const botonCancelar = evento.target.closest('[data-cancelar-inline]');
-  if (botonCancelar) {
-    // Simplemente volvemos a dibujar la tabla desde la caché (sin pedir
-    // datos de nuevo): descarta la edición en curso y restaura la fila.
-    dibujarTablaPagos();
+  const botonFichaExcel = evento.target.closest('button[data-ficha-excel-cliente]');
+  if (botonFichaExcel) {
+    const clienteId = Number(botonFichaExcel.dataset.fichaExcelCliente);
+    const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+    const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+    if (cliente && honorario) descargarFichaClienteExcel(cliente, honorario);
   }
-});
-
-elTablaPagosBody.addEventListener('submit', async (evento) => {
-  const formPago = evento.target.closest('form.form-pago-inline');
-  if (!formPago) return;
-  evento.preventDefault();
-  await guardarPagoInline(formPago);
 });
 
 // --- Ficha de pago descargable (PDF vía diálogo de impresión) -------------
