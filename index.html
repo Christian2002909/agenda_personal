@@ -155,12 +155,12 @@
 
           <div class="fila-form">
             <label for="cliente-honorario-mensual">Cuota Mensual (Gs.)</label>
-            <input type="number" id="cliente-honorario-mensual" min="1" step="1" placeholder="Ej: 110000" />
+            <input type="text" inputmode="numeric" id="cliente-honorario-mensual" placeholder="Ej: 110.000" />
           </div>
 
           <div class="fila-form">
             <label for="cliente-honorario-anual">Cuota Anual (Gs.)</label>
-            <input type="number" id="cliente-honorario-anual" min="1" step="1" placeholder="Ej: 150000" />
+            <input type="text" inputmode="numeric" id="cliente-honorario-anual" placeholder="Ej: 150.000" />
           </div>
 
           <div class="acciones-form">
@@ -184,7 +184,7 @@
       <section class="tarjeta">
         <h2>Presentaciones Pendientes</h2>
         <div class="fila-form">
-          <label for="presentaciones-filtro-cartera">Ver cartera de</label>
+          <label for="presentaciones-filtro-cartera">Responsable:</label>
           <select id="presentaciones-filtro-cartera">
             <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
                  "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
@@ -220,7 +220,7 @@
             </select>
           </div>
           <div class="fila-form">
-            <label for="historial-filtro-cartera">Ver cartera de</label>
+            <label for="historial-filtro-cartera">Responsable:</label>
             <select id="historial-filtro-cartera">
               <!-- Las opciones se arman dinámicamente desde js/historial.js:
                    "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
@@ -242,14 +242,14 @@
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
 
-      <!-- Importar/exportar en Excel (.xlsx): dos importadores separados
-           (cuotas pactadas, historial de pagos) más un exportador con dos
-           hojas (Honorarios + Historial de Pagos) -- ver js/honorarios.js. -->
+      <!-- Importar/exportar en Excel (.xlsx): la cuota mensual/anual ahora
+           se importa junto con el Excel de Clientes (ver js/clientes.js) --
+           acá solo queda el importador del historial de pagos y el
+           exportador con dos hojas (Honorarios + Historial de Pagos), ver
+           js/honorarios.js. -->
       <section class="tarjeta">
         <h2>Importar / Exportar Honorarios (Excel)</h2>
-        <div class="acciones-form">
-          <button type="button" id="btn-importar-cuotas-excel" class="boton boton-secundario">Importar Cuotas desde Excel</button>
-          <input type="file" id="input-importar-cuotas-excel" accept=".xlsx" class="oculto" />
+        <div class="acciones-form grupo-botones-excel">
           <button type="button" id="btn-importar-pagos-excel" class="boton boton-secundario">Importar Historial de Pagos desde Excel</button>
           <input type="file" id="input-importar-pagos-excel" accept=".xlsx" class="oculto" />
           <button type="button" id="btn-exportar-honorarios-excel" class="boton boton-secundario">Exportar a Excel</button>
@@ -274,7 +274,7 @@
             <input type="search" id="honorarios-buscar" placeholder="Nombre o RUC..." />
           </div>
           <div class="fila-form">
-            <label for="honorarios-filtro-cartera">Ver cartera de</label>
+            <label for="honorarios-filtro-cartera">Responsable:</label>
             <select id="honorarios-filtro-cartera">
               <!-- Las opciones se arman dinámicamente desde js/honorarios.js:
                    "Yo", una por cada perfil (tabla perfiles) y "Todos". -->

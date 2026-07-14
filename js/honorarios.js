@@ -35,13 +35,12 @@
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
 const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
+const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
 const elHonorariosBuscar = document.getElementById('honorarios-buscar');
 const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
 
-const elBtnImportarCuotas = document.getElementById('btn-importar-cuotas-excel');
-const elInputImportarCuotas = document.getElementById('input-importar-cuotas-excel');
 const elBtnImportarPagos = document.getElementById('btn-importar-pagos-excel');
 const elInputImportarPagos = document.getElementById('input-importar-pagos-excel');
 const elBtnExportarHonorarios = document.getElementById('btn-exportar-honorarios-excel');
@@ -123,6 +122,32 @@ function escaparHtmlHonorarios(texto) {
   const div = document.createElement('div');
   div.textContent = texto ?? '';
   return div.innerHTML;
+}
+
+// Reformatea un input de dinero (campo-pago-monto, campo-cuota-mensual,
+// campo-cuota-anual) con el punto separador de miles EN VIVO mientras se
+// escribe, tratando de mantener el cursor en una posición razonable (se
+// cuentan los dígitos antes del cursor y se lo recoloca después de esa
+// misma cantidad de dígitos en el texto ya formateado -- no hace falta que
+// sea perfecto, solo que no sea molesto de usar). El valor "real" (sin
+// puntos) se recupera con quitarPuntos() recién al guardar.
+function formatearInputDineroEnVivo(elInput) {
+  const posicionCursor = elInput.selectionStart ?? elInput.value.length;
+  const digitosAntesDelCursor = quitarPuntos(elInput.value.slice(0, posicionCursor)).length;
+
+  elInput.value = formatearConPuntos(elInput.value);
+
+  let digitosVistos = 0;
+  let nuevaPosicion = elInput.value.length;
+  for (let i = 0; i < elInput.value.length; i += 1) {
+    if (/\d/.test(elInput.value[i])) digitosVistos += 1;
+    if (digitosVistos === digitosAntesDelCursor) {
+      nuevaPosicion = i + 1;
+      break;
+    }
+  }
+  if (digitosAntesDelCursor === 0) nuevaPosicion = 0;
+  elInput.setSelectionRange(nuevaPosicion, nuevaPosicion);
 }
 
 // Enero es el único mes en que la cuota ANUAL todavía no cuenta como
@@ -532,7 +557,7 @@ function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
         ${selectorTipoHtml}
         <div class="fila-form">
           <label>Monto Pagado (Gs.)</label>
-          <input type="number" class="campo-pago-monto" min="1" step="1" required value="${montoInicial}" />
+          <input type="text" inputmode="numeric" class="campo-pago-monto" required value="${formatearConPuntos(String(montoInicial))}" />
         </div>
         <div class="fila-form">
           <label>Forma de Pago</label>
@@ -583,7 +608,7 @@ function actualizarCamposSegunTipoInline(selectTipo) {
 
   const montoInput = form.querySelector('.campo-pago-monto');
   const montoSugerido = tipo === 'mensual' ? honorario?.monto_mensual : honorario?.monto_anual;
-  if (montoInput && montoSugerido) montoInput.value = montoSugerido;
+  if (montoInput && montoSugerido) montoInput.value = formatearConPuntos(String(montoSugerido));
 
   const contenedorPeriodo = form.querySelector('.campo-pago-periodo-contenedor');
   if (contenedorPeriodo) {
@@ -596,7 +621,7 @@ async function guardarPagoInline(form) {
   const pagoId = form.dataset.pagoId ? Number(form.dataset.pagoId) : null;
 
   const tipo = form.querySelector('.campo-pago-tipo').value;
-  const monto = Number(form.querySelector('.campo-pago-monto').value);
+  const monto = Number(quitarPuntos(form.querySelector('.campo-pago-monto').value));
   const forma = form.querySelector('.campo-pago-forma').value;
   const recibo = form.querySelector('.campo-pago-recibo').value.trim() || null;
   const fecha = form.querySelector('.campo-pago-fecha').value || formatearFechaISO(new Date());
@@ -642,11 +667,11 @@ function construirFormularioEditarCuotaHtml(cliente, honorario) {
       <div class="grilla-form-inline">
         <div class="fila-form">
           <label>Cuota Mensual (Gs.)</label>
-          <input type="number" class="campo-cuota-mensual" min="1" step="1" value="${honorario?.monto_mensual ?? ''}" />
+          <input type="text" inputmode="numeric" class="campo-cuota-mensual" value="${formatearConPuntos(String(honorario?.monto_mensual ?? ''))}" />
         </div>
         <div class="fila-form">
           <label>Cuota Anual (Gs.)</label>
-          <input type="number" class="campo-cuota-anual" min="1" step="1" value="${honorario?.monto_anual ?? ''}" />
+          <input type="text" inputmode="numeric" class="campo-cuota-anual" value="${formatearConPuntos(String(honorario?.monto_anual ?? ''))}" />
         </div>
       </div>
       <div class="acciones-form">
@@ -666,8 +691,8 @@ function abrirFormularioEditarCuota(clienteId) {
 
 async function guardarCuotaInline(form) {
   const clienteId = Number(form.dataset.clienteId);
-  const montoMensualTexto = form.querySelector('.campo-cuota-mensual').value;
-  const montoAnualTexto = form.querySelector('.campo-cuota-anual').value;
+  const montoMensualTexto = quitarPuntos(form.querySelector('.campo-cuota-mensual').value);
+  const montoAnualTexto = quitarPuntos(form.querySelector('.campo-cuota-anual').value);
   const montoMensual = montoMensualTexto ? Number(montoMensualTexto) : null;
   const montoAnual = montoAnualTexto ? Number(montoAnualTexto) : null;
 
@@ -790,6 +815,13 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
   if (selectTipo && selectTipo.tagName === 'SELECT') {
     actualizarCamposSegunTipoInline(selectTipo);
   }
+});
+
+// Formato de miles en vivo para los inputs de dinero de los mini-formularios
+// (pago y editar cuota), armados dinámicamente dentro de esta tabla.
+elTablaHonorariosBody.addEventListener('input', (evento) => {
+  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual');
+  if (campoDinero) formatearInputDineroEnVivo(campoDinero);
 });
 
 elTablaHonorariosBody.addEventListener('click', (evento) => {
@@ -1055,11 +1087,15 @@ function generarFichaPago(cliente, honorario) {
 
 // --- Importar / Exportar Excel --------------------------------------------
 //
-// Dos importadores SEPARADOS (dos botones, dos archivos .xlsx distintos --
-// no es un solo Excel con varias hojas), más un exportador único con dos
-// hojas (Honorarios + Historial de Pagos, ver exportarHonorariosAExcel).
-// Comparten el mismo bloque de resumen (#honorarios-importar-resumen): se
-// reescribe con el título de cuál de los dos corrió por última vez.
+// La cuota mensual/anual pactada YA NO se importa desde acá -- se sacó el
+// botón "Importar Cuotas desde Excel" que existía antes: ahora esas dos
+// columnas se cargan junto con el resto de los datos del cliente en el
+// importador de Clientes (ver importarClientesDesdeExcel en js/clientes.js).
+// Acá solo queda el importador del historial de pagos, más un exportador
+// único con dos hojas (Honorarios + Historial de Pagos, ver
+// exportarHonorariosAExcel). El bloque de resumen
+// (#honorarios-importar-resumen) sigue existiendo por si en el futuro se
+// suma otro importador a esta pantalla.
 
 function mostrarResumenImportacionHonorarios(titulo, resumenTexto, filasSalteadas) {
   elImportarResumenHonorariosTitulo.textContent = titulo;
@@ -1095,107 +1131,6 @@ function parsearFechaDeCeldaHonorarios(valor) {
   }
 
   return null;
-}
-
-// --- Importar Cuotas (RUC + Cuota Mensual + Cuota Anual) ------------------
-//
-// Columnas esperadas: "RUC", "Cuota Mensual", "Cuota Anual" (al menos una
-// de las dos debe venir cargada). Por cada fila con un RUC que exista en
-// `clientes`, hace upsert sobre `honorarios` (onConflict cliente_id) --
-// mismo patrón que ya usa guardarCuotaInline() al editar la cuota desde
-// la interfaz. Si el RUC no existe, la fila se saltea con el motivo
-// "cliente no encontrado" (este importador no crea clientes nuevos, eso
-// es trabajo del importador de Clientes).
-async function importarCuotasDesdeExcel(archivo) {
-  if (!supabaseHonorarios) return;
-
-  elBtnImportarCuotas.disabled = true;
-  elImportarResumenHonorarios.classList.add('oculto');
-
-  try {
-    const filas = await leerFilasDeArchivoExcel(archivo);
-
-    const [{ data: clientes, error: errorClientes }, { data: honorariosExistentes, error: errorHonorarios }] =
-      await Promise.all([
-        supabaseHonorarios.from('clientes').select('id, ruc'),
-        supabaseHonorarios.from('honorarios').select('cliente_id'),
-      ]);
-    if (errorClientes) throw errorClientes;
-    if (errorHonorarios) throw errorHonorarios;
-
-    const idPorRuc = new Map((clientes || []).map((c) => [c.ruc.trim(), c.id]));
-    const clientesConHonorario = new Set((honorariosExistentes || []).map((h) => h.cliente_id));
-
-    let creados = 0;
-    let actualizados = 0;
-    const filasSalteadas = [];
-
-    for (let i = 0; i < filas.length; i += 1) {
-      const numeroFila = i + 2;
-      const fila = filas[i];
-
-      try {
-        const ruc = celdaTexto(fila['RUC']);
-        if (!ruc) throw new Error('RUC vacío.');
-
-        const clienteId = idPorRuc.get(ruc);
-        if (!clienteId) throw new Error('cliente no encontrado');
-
-        const montoMensual = celdaNumero(fila['Cuota Mensual']);
-        const montoAnual = celdaNumero(fila['Cuota Anual']);
-
-        if (montoMensual === null && montoAnual === null) {
-          throw new Error('Debe cargar Cuota Mensual y/o Cuota Anual.');
-        }
-        if (montoMensual !== null && montoMensual <= 0) throw new Error('Cuota Mensual debe ser mayor a 0.');
-        if (montoAnual !== null && montoAnual <= 0) throw new Error('Cuota Anual debe ser mayor a 0.');
-
-        const { error } = await supabaseHonorarios
-          .from('honorarios')
-          .upsert(
-            { cliente_id: clienteId, monto_mensual: montoMensual, monto_anual: montoAnual },
-            { onConflict: 'cliente_id' }
-          );
-        if (error) throw error;
-
-        if (clientesConHonorario.has(clienteId)) {
-          actualizados += 1;
-        } else {
-          creados += 1;
-          clientesConHonorario.add(clienteId); // por si el mismo RUC se repite más abajo en el archivo
-        }
-      } catch (errorFila) {
-        console.error(`Error al importar la fila ${numeroFila} del Excel de cuotas:`, errorFila);
-        filasSalteadas.push({ fila: numeroFila, motivo: errorFila.message || 'Error desconocido.' });
-      }
-    }
-
-    mostrarResumenImportacionHonorarios(
-      'Importar Cuotas',
-      `Importación de Cuotas terminada: ${creados} creada(s), ${actualizados} actualizada(s).`,
-      filasSalteadas
-    );
-
-    if (creados > 0 || actualizados > 0) await cargarHonorarios();
-  } catch (error) {
-    console.error('Error al importar cuotas desde Excel:', error);
-    if (error instanceof ErrorLibreriaExcelNoDisponible) {
-      mostrarMensajeHonorarios(error.message, 'error');
-    } else {
-      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
-    }
-  } finally {
-    elBtnImportarCuotas.disabled = false;
-    elInputImportarCuotas.value = '';
-  }
-}
-
-if (elBtnImportarCuotas && elInputImportarCuotas) {
-  elBtnImportarCuotas.addEventListener('click', () => elInputImportarCuotas.click());
-  elInputImportarCuotas.addEventListener('change', () => {
-    const archivo = elInputImportarCuotas.files[0];
-    if (archivo) importarCuotasDesdeExcel(archivo);
-  });
 }
 
 // --- Importar Historial de Pagos -------------------------------------------

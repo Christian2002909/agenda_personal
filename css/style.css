@@ -206,13 +206,19 @@ input[type='text'],
 input[type='number'],
 input[type='email'],
 input[type='password'],
-input[type='date'] {
+input[type='date'],
+input[type='search'] {
   padding: 8px 10px;
   border: 1px solid var(--color-input-borde);
   border-radius: 6px;
   font-size: 14px;
   background-color: var(--color-input-fondo);
   color: var(--color-texto);
+  /* Mismo alto para todos: antes faltaba input[type='search'] en esta
+     lista compartida (el buscador de Honorarios/Historial), así que se
+     veía con un borde/alto de navegador distinto al <select> de al lado
+     dentro de .fila-form-filtros-pagos. */
+  height: 38px;
 }
 
 .boton {
@@ -253,6 +259,22 @@ input[type='date'] {
   color: var(--color-marca);
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* Grupo de botones de Importar/Exportar Excel (hoy usado en Honorarios):
+   mismo ancho/alto y separación pareja entre sí en vez del tamaño dispar
+   que salía de dejar que cada botón se ajustara solo al largo de su
+   texto, más el margin-left de .boton-secundario sumándose al gap. */
+.grupo-botones-excel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.grupo-botones-excel .boton {
+  min-width: 230px;
+  min-height: 38px;
+  margin-left: 0;
 }
 
 .grupo-vencimiento {
