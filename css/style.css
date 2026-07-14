@@ -784,6 +784,11 @@ input[type='search'] {
 .fila-expandible td {
   background-color: var(--color-fondo);
   padding: 0;
+  /* Sin esto, el borde inferior que .tabla-clientes td pone por defecto se
+     seguía dibujando aunque la fila estuviera "cerrada" (grid en 0fr) --
+     como esta <tr> ya no se saca del flujo con display:none, ese borde
+     quedaba como una franja vacía entre cada cliente. */
+  border-bottom: none;
 }
 
 .fila-expandible-grid {
