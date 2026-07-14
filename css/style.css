@@ -336,6 +336,40 @@ input[type='search'] {
   line-height: 1.2;
 }
 
+/* Presentaciones (a diferencia de Historial): una vez presentada, la celda
+   deja de mostrar el checkbox y la fecha -- queda solo el texto
+   "Presentado", ya que a partir de ahí desmarcarla se hace desde Historial
+   (ver comentario de cabecera de js/presentaciones.js). Mismo padding que
+   .celda-historial-toggle para que la celda no cambie de alto según su
+   estado. */
+.celda-historial-listo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  font-weight: 600;
+}
+
+/* Aviso de "Deshacer"/"Aceptar" tras marcar una presentación (ver
+   mostrarAvisoDeshacer en js/presentaciones.js) -- reutiliza los colores de
+   .mensaje-exito, con los dos botones alineados a la derecha. */
+.aviso-deshacer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.aviso-deshacer-acciones {
+  display: flex;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
 .tabla-historial-mensual {
   table-layout: fixed;
   width: 100%;

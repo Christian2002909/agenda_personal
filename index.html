@@ -229,10 +229,11 @@
     <!-- VISTA: Presentaciones          -->
     <!-- ============================== -->
     <!-- Pantalla principal: absorbe lo que antes hacía la pestaña Calendario
-         (aparte, ya eliminada) -- para cada cliente se muestran TODAS sus
-         obligaciones pendientes/vigentes juntas (mensuales y anuales), cada
-         una con su fecha real de vencimiento, en vez de filtrar por una
-         sola obligación a la vez. -->
+         (aparte, ya eliminada) -- para cada cliente se muestra, según la
+         obligación elegida en el selector, el estado del período vigente
+         (pendiente, con checkbox y fecha de vencimiento; o ya presentado,
+         solo texto sin checkbox -- ver comentario de cabecera de
+         js/presentaciones.js). -->
     <section id="vista-presentaciones" class="vista">
       <section class="tarjeta">
         <h2>Presentaciones</h2>
@@ -253,6 +254,19 @@
           </div>
         </div>
         <div id="presentaciones-mensaje" class="mensaje mensaje-error oculto"></div>
+        <!-- Aviso de 5 segundos con "Deshacer"/"Aceptar" que aparece justo
+             después de tildar un checkbox como presentado -- ver
+             mostrarAvisoDeshacer() en js/presentaciones.js. Pasado ese
+             margen (o tocando "Aceptar"), la celda ya solo muestra el
+             texto "Presentado" y desmarcarla pasa a hacerse desde
+             Historial, no desde acá. -->
+        <div id="presentaciones-aviso-deshacer" class="mensaje mensaje-exito aviso-deshacer oculto">
+          <span>Presentado.</span>
+          <span class="aviso-deshacer-acciones">
+            <button type="button" id="btn-deshacer-presentacion" class="boton-link">Deshacer</button>
+            <button type="button" id="btn-aceptar-presentacion" class="boton-link">Aceptar</button>
+          </span>
+        </div>
         <div id="presentaciones-grupos">
           <!-- Los grupos "VENCIMIENTO N - FECHA D" se arman dinámicamente desde js/presentaciones.js -->
         </div>

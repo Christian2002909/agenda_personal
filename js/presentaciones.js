@@ -66,6 +66,9 @@ const elFiltroObligacion = document.getElementById('presentaciones-filtro-obliga
 const elGrupos = document.getElementById('presentaciones-grupos');
 const elSinPresentaciones = document.getElementById('sin-presentaciones');
 const elPresentacionesMensaje = document.getElementById('presentaciones-mensaje');
+const elAvisoDeshacer = document.getElementById('presentaciones-aviso-deshacer');
+const elBtnDeshacer = document.getElementById('btn-deshacer-presentacion');
+const elBtnAceptar = document.getElementById('btn-aceptar-presentacion');
 
 // Valores especiales del selector "Ver cartera de" (los perfiles puntuales
 // usan directamente su uuid como value).
@@ -95,6 +98,34 @@ let perfilesCache = [];
 // uuid del usuario logueado (auth.users.id vía supabase.auth.getSession()),
 // usado para la opción "Yo". null si no se pudo determinar.
 let usuarioActualId = null;
+
+// Datos de la última presentación tildada, mientras el aviso de "Deshacer"
+// (5 segundos) sigue abierto -- null si no hay ninguno pendiente. Guarda
+// también el id del setTimeout para poder cancelarlo si se cierra el aviso
+// antes de tiempo (se tocó "Aceptar", se destildó otra celda, cambió un
+// filtro, etc.).
+let avisoDeshacerActual = null;
+
+// Cierra el aviso de "Deshacer" (si estaba abierto) y cancela su cierre
+// automático. Se llama tanto al vencer los 5 segundos como al tocar
+// "Aceptar"/"Deshacer", y antes de abrir uno nuevo o cambiar de filtro,
+// para que nunca queden dos avisos referenciando presentaciones distintas.
+function ocultarAvisoDeshacer() {
+  if (avisoDeshacerActual?.timeoutId) clearTimeout(avisoDeshacerActual.timeoutId);
+  avisoDeshacerActual = null;
+  if (elAvisoDeshacer) elAvisoDeshacer.classList.add('oculto');
+}
+
+// Abre el aviso de "Deshacer" (5 segundos) para la presentación recién
+// tildada. La confirmación en sí ya se guardó en la base -- este aviso solo
+// ofrece una ventana corta para revertirla antes de que la celda pase a
+// mostrar únicamente el texto "Presentado" (ver construirCeldaObligacionHtml).
+function mostrarAvisoDeshacer({ clienteId, obligacionId, periodo }) {
+  ocultarAvisoDeshacer();
+  const timeoutId = setTimeout(ocultarAvisoDeshacer, 5000);
+  avisoDeshacerActual = { clienteId, obligacionId, periodo, timeoutId };
+  if (elAvisoDeshacer) elAvisoDeshacer.classList.remove('oculto');
+}
 
 // Crea (si todavía no existe) el registro "pendiente" del período vigente
 // para cada obligación que el contador le asignó a cada cliente (tabla
@@ -201,7 +232,12 @@ function actualizarContadoresFiltroObligacion(conteosPendientesPorGrupo) {
   }
 }
 
-if (elFiltroObligacion) elFiltroObligacion.addEventListener('change', () => dibujarPresentaciones());
+if (elFiltroObligacion) {
+  elFiltroObligacion.addEventListener('change', () => {
+    ocultarAvisoDeshacer();
+    dibujarPresentaciones();
+  });
+}
 
 // --- Usuario logueado y catálogo de perfiles, para "Ver cartera de" -------
 
@@ -259,7 +295,12 @@ function poblarFiltroCartera() {
   elFiltroCartera.value = sigueExistiendo ? seleccionActual : VALOR_CARTERA_YO;
 }
 
-if (elFiltroCartera) elFiltroCartera.addEventListener('change', () => dibujarPresentaciones());
+if (elFiltroCartera) {
+  elFiltroCartera.addEventListener('change', () => {
+    ocultarAvisoDeshacer();
+    dibujarPresentaciones();
+  });
+}
 
 // Clientes con responsable_id NULL (los que no tenían un match exacto en el
 // backfill, ver schema.sql sección 15.1): no se les puede atribuir a nadie
@@ -283,6 +324,8 @@ function filtrarClientesPorCartera(clientes) {
 
 async function cargarPresentaciones() {
   if (!supabasePresentaciones) return;
+
+  ocultarAvisoDeshacer();
 
   try {
     await Promise.all([cargarCatalogoObligaciones(), cargarUsuarioActual(), cargarPerfiles()]);
@@ -547,28 +590,37 @@ function construirFilaCliente(numero, { cliente, celdas }, columnas) {
   return tr;
 }
 
-// Celda editable de una obligación: todo el área de la celda es un <label>
-// que envuelve el checkbox de "presentado" (mismo patrón que ya usa la
-// grilla de Historial, celda-historial-toggle/-presentado/-pendiente),
-// mostrando la fecha de vencimiento del período vigente -- tanto si
-// todavía está pendiente como si ya se presentó. IDU no tiene fecha
-// calculable (fechaVencimiento llega en null): se muestra "según
-// corresponda" en vez de una fecha, ya que se confirma a mano.
+// Celda de una obligación. Dos estados, a diferencia de Historial (que
+// siempre muestra el checkbox en los dos sentidos):
+//   - Pendiente: todo el área de la celda es un <label> que envuelve el
+//     checkbox de "presentado" (mismo patrón que ya usa la grilla de
+//     Historial, celda-historial-toggle/-pendiente), con la fecha de
+//     vencimiento del período vigente. IDU no tiene fecha calculable
+//     (fechaVencimiento llega en null): se muestra "según corresponda" en
+//     vez de una fecha, ya que se confirma a mano.
+//   - Presentado: sin checkbox ni fecha, solo el texto "Presentado" (ver
+//     mostrarAvisoDeshacer -- el checkbox desaparece apenas se tilda, no
+//     recién en la siguiente carga; el aviso de 5 segundos es la única
+//     ventana para deshacerlo desde acá, después hay que ir a Historial).
 function construirCeldaObligacionHtml({ clienteId, obligacionId, periodo, presentado, fechaVencimiento }) {
-  const estadoClase = presentado ? 'celda-historial-presentado' : 'celda-historial-pendiente';
+  if (presentado) {
+    return `
+      <td class="celda-historial celda-historial-presentado">
+        <span class="celda-historial-listo">Presentado</span>
+      </td>
+    `;
+  }
+
   const fechaTexto = fechaVencimiento ? formatearFechaVisiblePresentaciones(fechaVencimiento) : 'según corresponda';
-  const titulo = presentado
-    ? `Presentado${fechaVencimiento ? ` (venció ${fechaTexto})` : ''}`
-    : `Pendiente${fechaVencimiento ? `, vence ${fechaTexto}` : ' de confirmar'}`;
+  const titulo = `Pendiente${fechaVencimiento ? `, vence ${fechaTexto}` : ' de confirmar'}`;
   return `
-    <td class="celda-historial ${estadoClase}">
+    <td class="celda-historial celda-historial-pendiente">
       <label class="celda-historial-toggle" title="${escaparHtmlPresentaciones(titulo)}">
         <input
           type="checkbox"
           data-cliente-id="${clienteId}"
           data-obligacion-id="${obligacionId}"
           data-periodo="${periodo}"
-          ${presentado ? 'checked' : ''}
         />
         <span>${fechaTexto}</span>
       </label>
@@ -598,25 +650,26 @@ elGrupos.addEventListener('click', (evento) => {
   }
 });
 
+// Los checkboxes de esta pantalla solo existen en las celdas "pendiente"
+// (ver construirCeldaObligacionHtml -- una vez presentada, la celda deja de
+// tener checkbox), así que el único evento posible acá es tildar uno para
+// marcarlo como presentado; desmarcarlo pasa a hacerse por el aviso de
+// "Deshacer" de abajo (5 segundos) o, pasado ese margen, desde Historial.
+//
 // Usamos "upsert" (misma constraint única cliente_id+obligacion_id+periodo
 // que ya usa asegurarPresentacionesDelPeriodoVigente/Historial) en vez de
-// "update por id": el checkbox ya no conoce el id de la fila de
-// `presentaciones` (dejó de pedirse en la consulta), y esto además cubre
-// el caso borde de una fila que por algún motivo no se haya generado
-// todavía -- incluida la primera vez que se tilda un IDU, que nunca se
-// pre-genera (ver asegurarPresentacionesDelPeriodoVigente).
+// "update por id": el checkbox no conoce el id de la fila de
+// `presentaciones` (no se pide en la consulta), y esto además cubre el
+// caso borde de una fila que por algún motivo no se haya generado todavía
+// -- incluida la primera vez que se tilda un IDU, que nunca se pre-genera
+// (ver asegurarPresentacionesDelPeriodoVigente).
 elGrupos.addEventListener('change', async (evento) => {
   const checkbox = evento.target.closest('input[type="checkbox"][data-cliente-id]');
-  if (!checkbox) return;
+  if (!checkbox || !checkbox.checked) return;
 
-  const marcarComoPresentado = checkbox.checked;
   const clienteId = Number(checkbox.dataset.clienteId);
   const obligacionId = Number(checkbox.dataset.obligacionId);
   const periodo = checkbox.dataset.periodo;
-
-  const cambios = marcarComoPresentado
-    ? { estado: 'presentado', fecha_presentacion: new Date().toISOString() }
-    : { estado: 'pendiente', fecha_presentacion: null };
 
   checkbox.disabled = true;
 
@@ -624,19 +677,21 @@ elGrupos.addEventListener('change', async (evento) => {
     const { error } = await supabasePresentaciones
       .from('presentaciones')
       .upsert(
-        [{ cliente_id: clienteId, obligacion_id: obligacionId, periodo, ...cambios }],
+        [{ cliente_id: clienteId, obligacion_id: obligacionId, periodo, estado: 'presentado', fecha_presentacion: new Date().toISOString() }],
         { onConflict: 'cliente_id,obligacion_id,periodo' }
       );
 
     if (error) throw error;
-    // La fila/celda del cliente sigue en pantalla tanto si se tildó como
-    // si se destildó (a diferencia del diseño anterior, acá nada
-    // desaparece) -- repintamos para reflejar el nuevo estado (checkbox +
-    // color de fondo de la celda + contador del selector).
+    // La fila/celda del cliente sigue en pantalla (a diferencia del diseño
+    // anterior, acá nada desaparece) -- repintamos para reflejar el nuevo
+    // estado: la celda ya no tiene checkbox, solo "Presentado" (color de
+    // fondo + contador del selector también se actualizan), y abrimos el
+    // aviso de "Deshacer" por 5 segundos.
     await dibujarPresentaciones();
+    mostrarAvisoDeshacer({ clienteId, obligacionId, periodo });
   } catch (error) {
     console.error('Error al actualizar presentación:', error);
-    checkbox.checked = !marcarComoPresentado; // revertimos el check visualmente
+    checkbox.checked = false;
     checkbox.disabled = false;
     if (elPresentacionesMensaje) {
       elPresentacionesMensaje.textContent = 'No se pudo guardar el cambio. Intentá de nuevo.';
@@ -644,6 +699,40 @@ elGrupos.addEventListener('change', async (evento) => {
     }
   }
 });
+
+// "Deshacer" del aviso: vuelve la presentación a pendiente (misma
+// constraint única de upsert que el resto de esta pantalla). "Aceptar"
+// simplemente cierra el aviso antes de tiempo -- la confirmación ya estaba
+// guardada desde que se tildó el checkbox, no hace nada más.
+if (elBtnDeshacer) {
+  elBtnDeshacer.addEventListener('click', async () => {
+    if (!avisoDeshacerActual) return;
+    const { clienteId, obligacionId, periodo } = avisoDeshacerActual;
+    ocultarAvisoDeshacer();
+
+    try {
+      const { error } = await supabasePresentaciones
+        .from('presentaciones')
+        .upsert(
+          [{ cliente_id: clienteId, obligacion_id: obligacionId, periodo, estado: 'pendiente', fecha_presentacion: null }],
+          { onConflict: 'cliente_id,obligacion_id,periodo' }
+        );
+
+      if (error) throw error;
+      await dibujarPresentaciones();
+    } catch (error) {
+      console.error('Error al deshacer la presentación:', error);
+      if (elPresentacionesMensaje) {
+        elPresentacionesMensaje.textContent = 'No se pudo deshacer. Podés hacerlo desde Historial.';
+        elPresentacionesMensaje.classList.remove('oculto');
+      }
+    }
+  });
+}
+
+if (elBtnAceptar) {
+  elBtnAceptar.addEventListener('click', () => ocultarAvisoDeshacer());
+}
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.
