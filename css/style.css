@@ -361,6 +361,16 @@ table.tabla-honorarios-grilla th {
   gap: 6px;
 }
 
+/* Columnas "Cuota Mensual"/"Cuota Anual" del resumen por cliente: monto
+   pactado + badge Al día/Debe, uno al lado del otro en una sola línea (el
+   badge ya no puede partirse gracias a white-space:nowrap en .badge). */
+.celda-cuota-resumen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 /* --- Secciones colapsables (Honorarios por Cliente / Historial de Pagos) -
    Arrancan cerradas (ver dibujarTablaHonorarios/dibujarTablaPagos, que las
    arman igual estén visibles o no) -- mismo truco de grid-template-rows
@@ -693,10 +703,14 @@ table.tabla-honorarios-grilla td:last-child {
    columna por obligación, así que ya no hace falta este layout de bloques. */
 
 .badge {
+  display: inline-block;
   padding: 3px 10px;
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
+  /* Un pill nunca debe partirse en dos líneas -- si el texto no entra, que
+     la columna se ensanche (la tabla ya tiene .tabla-scroll como salida). */
+  white-space: nowrap;
 }
 
 .badge-verde {

@@ -563,16 +563,18 @@ function totalOtrosGastosPendientes(clienteId) {
   return otrosGastosPendientesDeCliente(clienteId).reduce((total, gasto) => total + Number(gasto.monto), 0);
 }
 
-// Badge secundario "Otros gastos pendientes: Gs. X" -- mismo estilo neutro
+// Badge secundario "Otros gastos: Gs. X" -- mismo estilo neutro
 // (badge-neutro) que "Deuda congelada", a propósito: los tres indicadores
 // de esta pantalla (Al día/Debe, Deuda congelada, Otros gastos) tienen que
 // leerse como parte del mismo sistema visual, no como cosas sueltas. NO
 // suma nada al saldo de calcularSaldoPorTipo/calcularEstadoHonorario --
-// es intencionalmente un número aparte.
+// es intencionalmente un número aparte. Texto corto a propósito (el
+// contexto -- "pendientes de pago" -- ya lo da el título/la columna de
+// donde se usa este badge); la explicación completa queda en el title.
 function dibujarBadgeOtrosGastos(clienteId) {
   const total = totalOtrosGastosPendientes(clienteId);
   if (total <= 0) return '';
-  return `<span class="badge badge-neutro" title="Cargos sueltos (no la cuota mensual/anual) todavía no pagados por este cliente">Otros gastos pendientes: ${formatearGuaranies(total)}</span>`;
+  return `<span class="badge badge-neutro" title="Cargos sueltos (no la cuota mensual/anual) todavía no pagados por este cliente">Otros gastos: ${formatearGuaranies(total)}</span>`;
 }
 
 // Cantidad total de columnas de la tabla principal (Cliente + 12 meses +
@@ -1675,7 +1677,7 @@ function construirCeldaCuotaResumen(honorario, cliente, tipoHonorario) {
 
   const saldo = calcularSaldoPorTipo(honorario, cliente, tipoHonorario) ?? 0;
   const resultado = { estado: saldo > 0 ? 'debe' : 'al_dia', saldoPendiente: saldo };
-  return `${formatearGuaranies(monto)} ${dibujarBadgeEstado(resultado)}`;
+  return `<span class="celda-cuota-resumen">${formatearGuaranies(monto)} ${dibujarBadgeEstado(resultado)}</span>`;
 }
 
 function construirFilaResumenClienteHtml(cliente, honorario) {
