@@ -96,16 +96,32 @@
       <button id="btn-logout" class="boton boton-secundario boton-chico">Cerrar sesión</button>
     </div>
 
-    <!-- Aviso global: el usuario logueado no tiene fila propia en `perfiles`
-         (típicamente el primer admin, creado a mano en el dashboard de
-         Supabase antes de que existiera "Crear Responsable"). Vive fuera de
-         las vistas para verse sin importar en qué pestaña se esté -- ver
-         js/auth.js (detección) y js/configuracion.js (pestaña Usuarios, que
-         es adonde lleva el botón). No bloquea el uso del resto de la app. -->
-    <div id="banner-sin-perfil" class="banner-aviso oculto">
-      <span>Todavía no tenés tu propio perfil cargado en el sistema (tus clientes no pueden identificarte como responsable).</span>
-      <button type="button" id="btn-ir-a-completar-perfil" class="boton boton-primario boton-chico">Completar mi perfil</button>
-    </div>
+    <!-- Gate obligatorio: si el usuario logueado no tiene fila propia en
+         `perfiles` (primer login, o el primer admin creado a mano en el
+         dashboard de Supabase), ve SOLO esta pantalla -- nav y el resto de
+         la app quedan ocultos hasta que la complete (ver js/auth.js,
+         actualizarPantallaSegunSesion). Reemplaza al viejo banner
+         descartable + el formulario duplicado que vivía en Configuración →
+         Usuarios: dos lugares para hacer lo mismo generaba confusión (y
+         cuentas de más creadas por error). -->
+    <section id="vista-completar-perfil-inicial" class="vista-login oculto">
+      <div class="tarjeta tarjeta-login">
+        <h2>Antes de empezar...</h2>
+        <p class="login-instruccion">
+          Necesitamos tu nombre para identificarte como responsable de tus propios clientes.
+        </p>
+        <div id="completar-perfil-inicial-mensaje" class="mensaje mensaje-error oculto"></div>
+        <form id="form-completar-perfil-inicial">
+          <div class="fila-form">
+            <label for="completar-perfil-inicial-nombre">Tu nombre</label>
+            <input type="text" id="completar-perfil-inicial-nombre" placeholder="Ej: Christian" spellcheck="true" required />
+          </div>
+          <div class="acciones-form">
+            <button type="submit" class="boton boton-primario">Continuar</button>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <!-- Barra de navegación entre pantallas. data-vista indica qué sección
          de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
@@ -490,31 +506,11 @@
       </div>
 
       <div id="config-tab-usuarios" class="config-tab-panel oculto">
-        <!-- Autoregistro del propio usuario logueado: distinto de "Crear
-             Responsable" de abajo -- acá NO se crea ninguna cuenta de Auth
-             nueva (la cuenta ya existe, es la sesión actual), solo falta la
-             fila de `perfiles` con id = auth.uid() propio. Se muestra/oculta
-             desde js/configuracion.js según si ya existe esa fila (ver
-             cargarConfiguracion()). -->
-        <section class="tarjeta oculto" id="tarjeta-mi-perfil">
-          <h2>Tu perfil</h2>
-          <p>
-            Todavía no tenés tu propio perfil cargado -- completá tu nombre para que tus
-            clientes puedan identificarte como responsable. Esto no crea una cuenta nueva: la
-            tuya ya existe, es la sesión con la que estás logueado ahora mismo.
-          </p>
-          <div id="configuracion-mi-perfil-mensaje" class="mensaje oculto"></div>
-          <form id="form-mi-perfil">
-            <div class="fila-form">
-              <label for="mi-perfil-nombre">Tu nombre</label>
-              <input type="text" id="mi-perfil-nombre" placeholder="Ej: Nombre del responsable" spellcheck="true" required />
-            </div>
-            <div class="acciones-form">
-              <button type="submit" class="boton boton-primario">Crear mi perfil</button>
-            </div>
-          </form>
-        </section>
-
+        <!-- El autoregistro del propio usuario ("Tu perfil") ya no vive acá
+             -- ahora es obligatorio ANTES de entrar a la app (ver
+             #vista-completar-perfil-inicial más arriba y js/auth.js).
+             Tenerlo repetido en dos lugares era justamente lo que generaba
+             confusión y perfiles de más creados por error. -->
         <section class="tarjeta">
           <h2>Crear Responsable</h2>
           <p>

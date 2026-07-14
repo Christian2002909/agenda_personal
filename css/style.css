@@ -882,25 +882,6 @@ table.tabla-honorarios-grilla td:last-child {
   color: var(--color-texto-secundario);
 }
 
-/* Aviso global "no tenés tu propio perfil" (ver index.html/auth.js). Usa
-   los mismos colores de acento que .grupo-vencimiento-titulo/.boton-chico
-   en vez de sumar variables nuevas, para que quede claramente distinto de
-   .mensaje-error/.mensaje-exito (esto no es un error ni una confirmación,
-   es un aviso informativo que no bloquea nada). */
-.banner-aviso {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 32px;
-  background-color: var(--color-chico-fondo);
-  color: var(--color-chico-texto);
-  border-bottom: 1px solid var(--color-borde);
-  font-size: 13px;
-  text-align: center;
-}
-
 .subtitulo-form {
   margin: 22px 0 4px;
   padding-top: 14px;

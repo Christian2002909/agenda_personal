@@ -65,8 +65,16 @@ function restablecerBotonVerPassword() {
 
 const elBtnLogout = document.getElementById('btn-logout');
 const elUsuarioActual = document.getElementById('usuario-actual');
-const elBannerSinPerfil = document.getElementById('banner-sin-perfil');
-const elBtnIrACompletarPerfil = document.getElementById('btn-ir-a-completar-perfil');
+
+// Gate obligatorio de "Tu perfil" -- ver actualizarPantallaSegunSesion() y
+// verificarPerfilPropio() más abajo. elNavPrincipal/elContenedorPrincipal
+// son lo que se oculta mientras el gate está activo.
+const elVistaCompletarPerfilInicial = document.getElementById('vista-completar-perfil-inicial');
+const elFormCompletarPerfilInicial = document.getElementById('form-completar-perfil-inicial');
+const elCompletarPerfilInicialNombre = document.getElementById('completar-perfil-inicial-nombre');
+const elCompletarPerfilInicialMensaje = document.getElementById('completar-perfil-inicial-mensaje');
+const elNavPrincipal = document.querySelector('.nav-principal');
+const elContenedorPrincipal = document.querySelector('main.contenedor');
 
 // Clave de localStorage donde se guardan, por PC, los tokens de sesión de
 // cada perfil que tildó "Recordar" -- { [perfilId]: { access_token,
@@ -319,28 +327,6 @@ if (!supabaseAuth) {
 
   elBtnLogout.addEventListener('click', () => supabaseAuth.auth.signOut());
 
-  // Botón del banner "Completar mi perfil": lleva directo a Configuración →
-  // Usuarios, donde vive el formulario de autoregistro (ver js/configuracion.js,
-  // tarjeta "Tu perfil"). mostrarPestanaUsuariosConfiguracion() la expone
-  // configuracion.js -- mismo patrón que window.mostrarVista/window.editarClienteDesdeOtraVista.
-  if (elBtnIrACompletarPerfil) {
-    elBtnIrACompletarPerfil.addEventListener('click', () => {
-      if (typeof window.mostrarVista === 'function') {
-        window.mostrarVista('vista-configuracion');
-      }
-      if (typeof window.mostrarPestanaUsuariosConfiguracion === 'function') {
-        window.mostrarPestanaUsuariosConfiguracion();
-      }
-    });
-  }
-
-  // Expuesta para que js/configuracion.js pueda refrescar el banner apenas
-  // el propio usuario crea su perfil, sin esperar a un próximo login.
-  window.verificarPerfilPropio = () =>
-    supabaseAuth.auth
-      .getSession()
-      .then(({ data }) => verificarPerfilPropio(data?.session?.user?.id));
-
   // "Olvidé mi contraseña": Supabase manda el mail de recuperación si el
   // email existe. No distinguimos si existe o no en el mensaje (por
   // seguridad, para no confirmar qué emails están registrados). El email
@@ -394,23 +380,22 @@ function actualizarPantallaSegunSesion(sesion) {
   // tiene su propia fila en `perfiles` -- caso típico: el primer admin,
   // creado a mano en el dashboard de Supabase antes de que existiera
   // "Crear Responsable" en Configuración, nunca tuvo perfil propio y no
-  // puede identificarse como responsable de sus propios clientes (ver
-  // docs/PEDIDOS_PENDIENTES.md, "Pantalla Configuración / Clientes").
+  // puede identificarse como responsable de sus propios clientes. Mientras
+  // no la tenga, el gate obligatorio (#vista-completar-perfil-inicial)
+  // reemplaza a nav+main -- a diferencia del banner descartable que había
+  // antes, acá no se puede seguir de largo sin completarlo.
   verificarPerfilPropio(sesion.user.id);
 }
 
-// Muestra/oculta el banner global "no tenés tu propio perfil" (index.html,
-// fuera de las vistas para que se vea sin importar la pestaña activa). Se
-// vuelve a llamar sola tras cada login/logout, y queda expuesta en
-// "window" para que js/configuracion.js la dispare de nuevo apenas el
-// propio usuario crea su perfil (pestaña Usuarios), sin esperar a un
-// próximo login -- mismo mecanismo de comunicación entre pantallas que ya
-// usa el resto de la app (ver CLAUDE.md, "cross-file communication").
+// Muestra el gate obligatorio de "Tu perfil" (oculta nav+main) si el
+// usuario logueado todavía no tiene su propia fila en `perfiles`, o revela
+// la app normal si ya la tiene. Se vuelve a llamar sola tras cada login, y
+// desde el propio submit del gate apenas se crea el perfil (ver más abajo).
 async function verificarPerfilPropio(usuarioId) {
-  if (!elBannerSinPerfil) return;
+  if (!elVistaCompletarPerfilInicial) return;
 
   if (!usuarioId) {
-    elBannerSinPerfil.classList.add('oculto');
+    mostrarGatePerfil(false);
     return;
   }
 
@@ -423,15 +408,72 @@ async function verificarPerfilPropio(usuarioId) {
 
     if (error) throw error;
 
-    // Si ya existe la fila, ocultamos el aviso; si no existe (data null),
-    // lo mostramos.
-    elBannerSinPerfil.classList.toggle('oculto', Boolean(data));
+    // Si ya existe la fila, mostramos la app; si no existe (data null), el
+    // gate.
+    mostrarGatePerfil(!data);
   } catch (error) {
     console.error('Error al verificar si el usuario logueado tiene su propio perfil en "perfiles":', error);
-    // Ante un error de red/consulta no mostramos el aviso por las dudas --
-    // no queremos alarmar de más si en realidad sí tiene perfil y solo
-    // falló esta consulta puntual; la próxima carga lo vuelve a intentar.
+    // Ante un error de red/consulta no bloqueamos por las dudas -- no
+    // queremos dejar a alguien afuera de la app si en realidad sí tiene
+    // perfil y solo falló esta consulta puntual; la próxima carga lo
+    // vuelve a intentar.
+    mostrarGatePerfil(false);
   }
+}
+
+function mostrarGatePerfil(mostrar) {
+  elVistaCompletarPerfilInicial.classList.toggle('oculto', !mostrar);
+  if (elNavPrincipal) elNavPrincipal.classList.toggle('oculto', mostrar);
+  if (elContenedorPrincipal) elContenedorPrincipal.classList.toggle('oculto', mostrar);
+}
+
+// Único lugar de toda la app donde un usuario logueado se crea SU PROPIO
+// perfil (id = su propia sesión, nunca la de otro -- para dar de alta a
+// otra persona está "Crear Responsable" en Configuración → Usuarios, que
+// sí crea una cuenta de Auth nueva). Antes esto vivía duplicado acá Y en
+// Configuración, lo que llevó a crear perfiles de más por error.
+if (elFormCompletarPerfilInicial) {
+  elFormCompletarPerfilInicial.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+
+    const nombre = elCompletarPerfilInicialNombre.value.trim();
+    if (!nombre) return;
+
+    const boton = elFormCompletarPerfilInicial.querySelector('button[type="submit"]');
+    boton.disabled = true;
+    if (elCompletarPerfilInicialMensaje) elCompletarPerfilInicialMensaje.classList.add('oculto');
+
+    try {
+      const { data: sesionData, error: errorSesion } = await supabaseAuth.auth.getSession();
+      const usuarioId = sesionData?.session?.user?.id;
+      const usuarioEmail = sesionData?.session?.user?.email || null;
+      if (errorSesion || !usuarioId) {
+        throw new Error('No se pudo leer tu sesión actual.');
+      }
+
+      const { error: errorPerfil } = await supabaseAuth
+        .from('perfiles')
+        .insert({ id: usuarioId, nombre, rol: 'responsable', email: usuarioEmail });
+
+      if (errorPerfil) throw errorPerfil;
+
+      elFormCompletarPerfilInicial.reset();
+      mostrarGatePerfil(false);
+    } catch (error) {
+      console.error('Error al crear tu perfil propio:', error);
+      const mensajeCrudo = error?.message || '';
+      let mensaje = 'No se pudo crear tu perfil. Intentá de nuevo.';
+      if (/duplicate key|already exists/i.test(mensajeCrudo)) {
+        mensaje = 'Ya tenés un perfil creado -- volvé a abrir la aplicación.';
+      }
+      if (elCompletarPerfilInicialMensaje) {
+        elCompletarPerfilInicialMensaje.textContent = mensaje;
+        elCompletarPerfilInicialMensaje.classList.remove('oculto');
+      }
+    } finally {
+      boton.disabled = false;
+    }
+  });
 }
 
 })();
