@@ -738,6 +738,78 @@ create index if not exists idx_deudas_congeladas_pendientes
     where pagada = false;
 
 -- ---------------------------------------------------------------------
+-- 11.2 TABLA otros_gastos_honorarios
+-- ---------------------------------------------------------------------
+-- Cargo suelto por vez (NO una cuota recurrente configurable como
+-- honorarios.monto_mensual/monto_anual): un trámite puntual, un gasto que
+-- el estudio adelantó por el cliente, etc. -- cada fila es un cargo
+-- independiente con su propio monto/motivo/fecha, se van sumando de a uno
+-- (ver docs/PEDIDOS_PENDIENTES.md, "Tercera ronda de pedidos" > "Pantalla
+-- Honorarios" > "Nueva categoría 'Otros Gastos'"). A propósito NO
+-- participa de calcularSaldoPorTipo/calcularEstadoHonorario -- el estado
+-- "Al día"/"Debe" sigue siendo solo sobre la cuota mensual/anual, sin
+-- cambios en esa lógica -- esta tabla tiene su propio indicador aparte en
+-- js/honorarios.js ("Otros gastos pendientes: Gs. X"), sin mezclarse con
+-- el número principal.
+--
+-- Mismos campos de pago que pagos_honorarios (fecha_pago/forma_pago/
+-- numero_recibo), reusando ese patrón -- pero acá son nullable porque, a
+-- diferencia de un pago (que siempre representa dinero ya cobrado), un
+-- "otro gasto" arranca como un cargo pendiente (pagado = false) y esos
+-- tres campos recién se completan cuando se marca pagado (mismo espíritu
+-- que deudas_congeladas_honorarios.pagada/fecha_pago, ver arriba).
+create table if not exists public.otros_gastos_honorarios (
+    id             bigint generated always as identity primary key,
+
+    cliente_id     bigint not null
+                       references public.clientes(id) on delete cascade,
+
+    -- Motivo del cargo (ej. "Trámite de habilitación municipal").
+    descripcion    text not null,
+
+    monto          numeric(14, 0) not null,
+
+    -- Cuándo se generó el cargo (no confundir con created_at, que es
+    -- cuándo se CARGÓ en el sistema -- normalmente el mismo día, pero se
+    -- deja editable para cargar cargos atrasados, igual que
+    -- pagos_honorarios.fecha_pago).
+    fecha_cargo    date not null default current_date,
+
+    -- Se completa recién cuando se cobra (ver constraint
+    -- otros_gastos_honorarios_pagado_consistente).
+    pagado         boolean not null default false,
+    fecha_pago     date,
+    forma_pago     text,
+    numero_recibo  text,
+
+    created_at     timestamptz not null default now(),
+    updated_at     timestamptz not null default now(),
+
+    constraint otros_gastos_honorarios_monto_positivo
+        check (monto > 0),
+
+    constraint otros_gastos_honorarios_forma_pago_valida
+        check (forma_pago is null or forma_pago in ('efectivo', 'transferencia', 'cheque')),
+
+    constraint otros_gastos_honorarios_pagado_consistente
+        check (
+            (pagado = false and fecha_pago is null)
+            or
+            (pagado = true and fecha_pago is not null)
+        )
+);
+
+comment on table public.otros_gastos_honorarios is
+    'Cargos sueltos por cliente (no una cuota recurrente): cada fila es un monto puntual con su propia descripción y fecha, independiente de honorarios.monto_mensual/monto_anual y de calcularSaldoPorTipo/calcularEstadoHonorario. Se marca pagado (con fecha_pago/forma_pago/numero_recibo, mismo patrón de campos que pagos_honorarios) cuando se cobra.';
+
+-- Acelera "¿este cliente tiene otros gastos pendientes, y por cuánto?",
+-- que se consulta para cada fila de la tabla de Honorarios (mismo criterio
+-- que idx_deudas_congeladas_pendientes de arriba).
+create index if not exists idx_otros_gastos_honorarios_pendientes
+    on public.otros_gastos_honorarios (cliente_id)
+    where pagado = false;
+
+-- ---------------------------------------------------------------------
 -- 12. TRIGGERS updated_at — reusan public.set_updated_at(), ya creada en
 --     la sección 3 para `clientes` (no se redefine la función).
 -- ---------------------------------------------------------------------
@@ -780,6 +852,12 @@ create trigger trg_pagos_honorarios_set_updated_at
 drop trigger if exists trg_deudas_congeladas_honorarios_set_updated_at on public.deudas_congeladas_honorarios;
 create trigger trg_deudas_congeladas_honorarios_set_updated_at
     before update on public.deudas_congeladas_honorarios
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_otros_gastos_honorarios_set_updated_at on public.otros_gastos_honorarios;
+create trigger trg_otros_gastos_honorarios_set_updated_at
+    before update on public.otros_gastos_honorarios
     for each row
     execute function public.set_updated_at();
 
@@ -902,6 +980,21 @@ create policy "deudas_congeladas_honorarios_acceso_autenticados"
 
 revoke select, insert, update, delete on public.deudas_congeladas_honorarios from anon;
 grant select, insert, update, delete on public.deudas_congeladas_honorarios to authenticated;
+
+-- otros_gastos_honorarios
+alter table public.otros_gastos_honorarios enable row level security;
+
+drop policy if exists "otros_gastos_honorarios_acceso_autenticados" on public.otros_gastos_honorarios;
+
+create policy "otros_gastos_honorarios_acceso_autenticados"
+    on public.otros_gastos_honorarios
+    for all
+    to authenticated
+    using (true)
+    with check (true);
+
+revoke select, insert, update, delete on public.otros_gastos_honorarios from anon;
+grant select, insert, update, delete on public.otros_gastos_honorarios to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 14. ENDURECIMIENTO POR ROL (futuro, opcional) — mismo criterio que la

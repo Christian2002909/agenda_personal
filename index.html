@@ -254,6 +254,18 @@
           <input type="file" id="input-importar-pagos-excel" accept=".xlsx" class="oculto" />
           <button type="button" id="btn-exportar-honorarios-excel" class="boton boton-secundario">Exportar a Excel</button>
         </div>
+        <!-- "Otros Gastos" también se puede importar desde Excel, pero a
+             diferencia de los botones de arriba (siempre visibles) queda
+             escondido detrás de este desplegable colapsado por defecto --
+             es una categoría nueva y poco usada todavía, no amerita un
+             botón grande permanente junto a los dos de uso habitual. -->
+        <details class="mas-opciones-excel">
+          <summary>Más opciones</summary>
+          <div class="acciones-form">
+            <button type="button" id="btn-importar-gastos-excel" class="boton boton-secundario">Importar Otros Gastos desde Excel</button>
+            <input type="file" id="input-importar-gastos-excel" accept=".xlsx" class="oculto" />
+          </div>
+        </details>
         <div id="honorarios-importar-resumen" class="resumen-importacion oculto">
           <p id="honorarios-importar-resumen-titulo" class="fila-form-titulo"></p>
           <p id="honorarios-importar-resumen-texto"></p>

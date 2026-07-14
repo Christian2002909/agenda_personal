@@ -25,6 +25,18 @@
 // de "Debe", hasta que se marca "pagada" (no genera un pago en
 // pagos_honorarios, ver comentario en schema.sql).
 //
+// "Otros gastos" (tabla otros_gastos_honorarios): cargos sueltos por vez
+// (un trámite puntual, un gasto adelantado, etc.), completamente
+// INDEPENDIENTES de la cuota mensual/anual -- a propósito NO participan de
+// calcularSaldoPorTipo/calcularEstadoHonorario, tienen su propio badge
+// aparte ("Otros gastos pendientes: Gs. X") y su propio botón/panel. Se
+// cargan con descripción + monto + fecha del cargo, y se marcan pagados
+// con su propio mini-formulario (fecha de pago, forma de pago, N° de
+// recibo opcional -- mismos campos que pagos_honorarios, reusando ese
+// patrón). También se pueden importar desde Excel, como opción oculta
+// bajo "Más opciones" en la tarjeta de Importar/Exportar (ver
+// importarOtrosGastosDesdeExcel más abajo).
+//
 // Registrar un pago, editar la cuota pactada y ver el detalle de un
 // cliente se hacen todos expandiendo una fila-formulario debajo de la fila
 // del cliente en la tabla principal (mismo espíritu que el checkbox
@@ -46,7 +58,7 @@
 
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
+const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, celdaEsAfirmativa, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
 const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
@@ -55,6 +67,8 @@ const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
 
 const elBtnImportarPagos = document.getElementById('btn-importar-pagos-excel');
 const elInputImportarPagos = document.getElementById('input-importar-pagos-excel');
+const elBtnImportarGastos = document.getElementById('btn-importar-gastos-excel');
+const elInputImportarGastos = document.getElementById('input-importar-gastos-excel');
 const elBtnExportarHonorarios = document.getElementById('btn-exportar-honorarios-excel');
 const elImportarResumenHonorarios = document.getElementById('honorarios-importar-resumen');
 const elImportarResumenHonorariosTitulo = document.getElementById('honorarios-importar-resumen-titulo');
@@ -113,6 +127,9 @@ let pagosCache = [];
 // un cliente+tipo, diferida sin perdonarse -- ver contarPeriodosAdeudables
 // y dibujarBadgesDeudaCongelada más abajo.
 let deudasCongeladasCache = [];
+// Otros gastos (tabla otros_gastos_honorarios): cargos sueltos por vez,
+// independientes de la cuota -- ver dibujarBadgeOtrosGastos más abajo.
+let otrosGastosCache = [];
 let configuracionEstudio = null;
 // Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
 let perfilesCache = [];
@@ -274,6 +291,7 @@ async function cargarHonorarios() {
       { data: honorarios, error: errorHonorarios },
       { data: pagos, error: errorPagos },
       { data: deudasCongeladas, error: errorDeudasCongeladas },
+      { data: otrosGastos, error: errorOtrosGastos },
       { data: configuracion, error: errorConfiguracion },
     ] = await Promise.all([
       supabaseHonorarios
@@ -283,6 +301,7 @@ async function cargarHonorarios() {
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
       supabaseHonorarios.from('deudas_congeladas_honorarios').select('*'),
+      supabaseHonorarios.from('otros_gastos_honorarios').select('*').order('fecha_cargo', { ascending: false }),
       supabaseHonorarios.from('configuracion_estudio').select('*').eq('id', 1).maybeSingle(),
     ]);
 
@@ -290,12 +309,14 @@ async function cargarHonorarios() {
     if (errorHonorarios) throw errorHonorarios;
     if (errorPagos) throw errorPagos;
     if (errorDeudasCongeladas) throw errorDeudasCongeladas;
+    if (errorOtrosGastos) throw errorOtrosGastos;
     if (errorConfiguracion) throw errorConfiguracion;
 
     clientesCacheHonorarios = clientes || [];
     honorariosCache = honorarios || [];
     pagosCache = pagos || [];
     deudasCongeladasCache = deudasCongeladas || [];
+    otrosGastosCache = otrosGastos || [];
     configuracionEstudio = configuracion || null;
 
     await Promise.all([cargarUsuarioActual(), cargarPerfiles()]);
@@ -464,6 +485,30 @@ function dibujarBadgesDeudaCongelada(clienteId, tipoFiltro = null) {
     .join(' ');
 }
 
+// --- Otros gastos (cargos sueltos, independientes de la cuota) -----------
+
+// Todos los "otros gastos" TODAVÍA pendientes (pagado = false) de un
+// cliente -- para el badge y el panel de gestión.
+function otrosGastosPendientesDeCliente(clienteId) {
+  return otrosGastosCache.filter((gasto) => gasto.cliente_id === clienteId && !gasto.pagado);
+}
+
+function totalOtrosGastosPendientes(clienteId) {
+  return otrosGastosPendientesDeCliente(clienteId).reduce((total, gasto) => total + Number(gasto.monto), 0);
+}
+
+// Badge secundario "Otros gastos pendientes: Gs. X" -- mismo estilo neutro
+// (badge-neutro) que "Deuda congelada", a propósito: los tres indicadores
+// de esta pantalla (Al día/Debe, Deuda congelada, Otros gastos) tienen que
+// leerse como parte del mismo sistema visual, no como cosas sueltas. NO
+// suma nada al saldo de calcularSaldoPorTipo/calcularEstadoHonorario --
+// es intencionalmente un número aparte.
+function dibujarBadgeOtrosGastos(clienteId) {
+  const total = totalOtrosGastosPendientes(clienteId);
+  if (total <= 0) return '';
+  return `<span class="badge badge-neutro" title="Cargos sueltos (no la cuota mensual/anual) todavía no pagados por este cliente">Otros gastos pendientes: ${formatearGuaranies(total)}</span>`;
+}
+
 function dibujarTablaHonorarios() {
   elTablaHonorariosBody.innerHTML = '';
 
@@ -489,19 +534,21 @@ function dibujarTablaHonorarios() {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
     const resultado = calcularEstadoHonorario(honorario, cliente);
     const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+    const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
 
     const filaCliente = document.createElement('tr');
     filaCliente.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${honorario?.monto_mensual ? formatearGuaranies(honorario.monto_mensual) : '—'}</td>
       <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
-      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}</td>
+      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}${badgeOtrosGastos ? `<br />${badgeOtrosGastos}` : ''}</td>
       <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
       <td>
         <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
         <button type="button" class="boton boton-chico" data-editar-cuota-id="${cliente.id}">Editar cuota</button>
         <button type="button" class="boton boton-chico" data-detalle-cliente-id="${cliente.id}">Detalle</button>
         <button type="button" class="boton boton-chico" data-congelar-deuda-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Deuda congelada</button>
+        <button type="button" class="boton boton-chico" data-otros-gastos-id="${cliente.id}">Otros Gastos</button>
       </td>
     `;
     elTablaHonorariosBody.appendChild(filaCliente);
@@ -971,6 +1018,161 @@ async function marcarDeudaCongeladaPagada(deudaId) {
   }
 }
 
+// --- Otros gastos (cargos sueltos, independientes de la cuota) -----------
+//
+// Mismo espíritu de fila-expandible que el resto de esta pantalla: un
+// panel que junta la lista de "otros gastos" TODAVÍA pendientes del
+// cliente (con botón "Marcar pagado" cada uno, que despliega un
+// mini-formulario propio con fecha de pago/forma de pago/N° de recibo -- a
+// diferencia de "Marcar cobrada" de Deuda Congelada, acá SÍ hace falta un
+// formulario porque el pedido pide poder cargar esos tres datos) y un
+// mini-formulario para cargar un gasto nuevo (descripción + monto + fecha
+// del cargo). Los gastos ya pagados no aparecen en esta lista -- se ven en
+// el "Detalle" del cliente (construirDetalleClienteHtml más abajo), que
+// lista TODOS (pagados y pendientes).
+
+function construirListaOtrosGastosPendientesHtml(clienteId) {
+  const pendientes = otrosGastosPendientesDeCliente(clienteId);
+  if (pendientes.length === 0) {
+    return '<p class="sin-datos">Este cliente no tiene otros gastos pendientes.</p>';
+  }
+
+  return `
+    <ul class="lista-resumen-importacion">
+      ${pendientes
+        .map((gasto) => `
+          <li data-fila-gasto-id="${gasto.id}">
+            ${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}
+            -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}
+            <button type="button" class="boton boton-chico" data-marcar-gasto-pagado-id="${gasto.id}">Marcar pagado</button>
+          </li>
+        `)
+        .join('')}
+    </ul>`;
+}
+
+// Mini-formulario que reemplaza, en el lugar, el <li> de un gasto pendiente
+// cuando se hace clic en "Marcar pagado" -- mismos campos que
+// pagos_honorarios (fecha de pago, forma de pago, N° de recibo opcional).
+function construirSubformularioMarcarGastoPagadoHtml(gasto) {
+  return `
+    <form class="form-marcar-gasto-pagado-inline" data-gasto-id="${gasto.id}">
+      <p>${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}</p>
+      <div class="grilla-form-inline">
+        <div class="fila-form">
+          <label>Fecha de Pago</label>
+          <input type="date" class="campo-gasto-fecha-pago" value="${formatearFechaISO(new Date())}" />
+        </div>
+        <div class="fila-form">
+          <label>Forma de Pago</label>
+          <select class="campo-gasto-forma-pago">
+            <option value="efectivo" selected>Efectivo</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </div>
+        <div class="fila-form">
+          <label>N° de Recibo</label>
+          <input type="text" class="campo-gasto-recibo" placeholder="Ej: 0231" spellcheck="true" />
+        </div>
+      </div>
+      <div class="acciones-form">
+        <button type="submit" class="boton boton-primario boton-chico">Marcar Pagado</button>
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-marcar-gasto>Cancelar</button>
+      </div>
+    </form>
+  `;
+}
+
+function construirFormularioOtrosGastosHtml(cliente) {
+  return `
+    <div class="detalle-cliente-inline">
+      <h3 class="fila-form-titulo">Otros Gastos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      ${construirListaOtrosGastosPendientesHtml(cliente.id)}
+      <form class="form-nuevo-gasto-inline" data-cliente-id="${cliente.id}">
+        <h3 class="fila-form-titulo">Cargar gasto nuevo</h3>
+        <div class="grilla-form-inline">
+          <div class="fila-form">
+            <label>Descripción</label>
+            <input type="text" class="campo-gasto-descripcion" required spellcheck="true" placeholder="Ej: Trámite de habilitación municipal" />
+          </div>
+          <div class="fila-form">
+            <label>Monto (Gs.)</label>
+            <input type="text" inputmode="numeric" class="campo-gasto-monto" required />
+          </div>
+          <div class="fila-form">
+            <label>Fecha del Cargo</label>
+            <input type="date" class="campo-gasto-fecha-cargo" value="${formatearFechaISO(new Date())}" />
+          </div>
+        </div>
+        <div class="acciones-form">
+          <button type="submit" class="boton boton-primario boton-chico">Cargar Gasto</button>
+          <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function abrirFormularioOtrosGastos(clienteId) {
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+  if (!cliente) return;
+  abrirFilaExpandible(clienteId, construirFormularioOtrosGastosHtml(cliente));
+}
+
+async function guardarGastoNuevoInline(form) {
+  const clienteId = Number(form.dataset.clienteId);
+  const descripcion = form.querySelector('.campo-gasto-descripcion').value.trim();
+  const monto = Number(quitarPuntos(form.querySelector('.campo-gasto-monto').value));
+  const fechaCargo = form.querySelector('.campo-gasto-fecha-cargo').value || formatearFechaISO(new Date());
+
+  if (!descripcion) {
+    mostrarMensajeHonorarios('Cargá una descripción para el gasto.', 'error');
+    return;
+  }
+  if (!monto || monto <= 0) {
+    mostrarMensajeHonorarios('Cargá un monto válido.', 'error');
+    return;
+  }
+
+  try {
+    const { error } = await supabaseHonorarios.from('otros_gastos_honorarios').insert({
+      cliente_id: clienteId,
+      descripcion,
+      monto,
+      fecha_cargo: fechaCargo,
+    });
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto cargado correctamente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al cargar el gasto:', error);
+    mostrarMensajeHonorarios('No se pudo cargar el gasto.', 'error');
+  }
+}
+
+async function guardarGastoPagadoInline(form) {
+  const gastoId = Number(form.dataset.gastoId);
+  const fechaPago = form.querySelector('.campo-gasto-fecha-pago').value || formatearFechaISO(new Date());
+  const formaPago = form.querySelector('.campo-gasto-forma-pago').value;
+  const numeroRecibo = form.querySelector('.campo-gasto-recibo').value.trim() || null;
+
+  try {
+    const { error } = await supabaseHonorarios
+      .from('otros_gastos_honorarios')
+      .update({ pagado: true, fecha_pago: fechaPago, forma_pago: formaPago, numero_recibo: numeroRecibo })
+      .eq('id', gastoId);
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto marcado como pagado.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al marcar el gasto como pagado:', error);
+    mostrarMensajeHonorarios('No se pudo marcar el gasto como pagado.', 'error');
+  }
+}
+
 // --- Detalle de pagos de un cliente ---------------------------------------
 
 // Fila de una tabla de pagos (Historial de Pagos o el detalle de un
@@ -992,6 +1194,33 @@ function construirFilaPagoHtml(pago, cliente) {
   `;
 }
 
+// Lista COMPLETA (pagados y pendientes) de "otros gastos" de un cliente,
+// para el Detalle -- a diferencia de construirListaOtrosGastosPendientesHtml
+// (usada en el panel de "Otros Gastos", que solo lista los pendientes
+// porque ahí lo que importa es poder marcarlos pagados), acá es de solo
+// lectura, sin botones de acción.
+function construirListaOtrosGastosDetalleHtml(clienteId) {
+  const gastos = otrosGastosCache
+    .filter((gasto) => gasto.cliente_id === clienteId)
+    .sort((a, b) => (a.fecha_cargo < b.fecha_cargo ? 1 : -1));
+
+  if (gastos.length === 0) {
+    return '<p class="sin-datos">Este cliente no tiene otros gastos cargados.</p>';
+  }
+
+  return `
+    <ul class="lista-resumen-importacion">
+      ${gastos
+        .map((gasto) => {
+          const detallePago = gasto.pagado
+            ? ` -- pagado el ${formatearFechaVisibleHonorarios(gasto.fecha_pago)} (${formatearFormaPago(gasto.forma_pago)}${gasto.numero_recibo ? `, recibo ${escaparHtmlHonorarios(gasto.numero_recibo)}` : ''})`
+            : ' -- <strong>pendiente</strong>';
+          return `<li>${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)} -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}${detallePago}</li>`;
+        })
+        .join('')}
+    </ul>`;
+}
+
 function construirDetalleClienteHtml(cliente) {
   const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
   const resultado = calcularEstadoHonorario(honorario, cliente);
@@ -1005,12 +1234,14 @@ function construirDetalleClienteHtml(cliente) {
     : `<tr><td colspan="${PAGO_COLSPAN}" class="sin-datos">Todavía no se registró ningún pago.</td></tr>`;
 
   const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+  const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
 
   return `
     <div class="detalle-cliente-inline">
       <h3 class="fila-form-titulo">Historial de Pagos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
       <p>Saldo pendiente: ${dibujarBadgeEstado(resultado)}</p>
       ${badgesDeudaCongelada ? `<p>${badgesDeudaCongelada}</p>` : ''}
+      ${badgeOtrosGastos ? `<p>${badgeOtrosGastos}</p>` : ''}
       <div class="tabla-scroll">
         <table class="tabla-clientes">
           <thead>
@@ -1022,6 +1253,8 @@ function construirDetalleClienteHtml(cliente) {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
+      <h3 class="fila-form-titulo">Otros Gastos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      ${construirListaOtrosGastosDetalleHtml(cliente.id)}
       <div class="acciones-form">
         <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
       </div>
@@ -1073,7 +1306,7 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
 // (pago, editar cuota y congelar deuda), armados dinámicamente dentro de
 // esta tabla.
 elTablaHonorariosBody.addEventListener('input', (evento) => {
-  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual, .campo-deuda-monto');
+  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual, .campo-deuda-monto, .campo-gasto-monto');
   if (campoDinero) formatearInputDineroEnVivo(campoDinero);
 });
 
@@ -1108,6 +1341,28 @@ elTablaHonorariosBody.addEventListener('click', (evento) => {
   const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
   if (botonMarcarDeudaPagada) {
     marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));
+    return;
+  }
+
+  const botonOtrosGastos = evento.target.closest('button[data-otros-gastos-id]');
+  if (botonOtrosGastos) {
+    abrirFormularioOtrosGastos(Number(botonOtrosGastos.dataset.otrosGastosId));
+    return;
+  }
+
+  const botonMarcarGastoPagado = evento.target.closest('button[data-marcar-gasto-pagado-id]');
+  if (botonMarcarGastoPagado) {
+    const gastoId = Number(botonMarcarGastoPagado.dataset.marcarGastoPagadoId);
+    const gasto = otrosGastosCache.find((g) => g.id === gastoId);
+    const filaGasto = evento.target.closest('li[data-fila-gasto-id]');
+    if (gasto && filaGasto) filaGasto.innerHTML = construirSubformularioMarcarGastoPagadoHtml(gasto);
+    return;
+  }
+
+  const botonCancelarMarcarGasto = evento.target.closest('[data-cancelar-marcar-gasto]');
+  if (botonCancelarMarcarGasto) {
+    const filaExpandible = evento.target.closest('tr.fila-expandible');
+    if (filaExpandible) abrirFormularioOtrosGastos(Number(filaExpandible.dataset.expandibleId));
     return;
   }
 
@@ -1151,6 +1406,20 @@ elTablaHonorariosBody.addEventListener('submit', async (evento) => {
   if (formDeuda) {
     evento.preventDefault();
     await guardarDeudaCongeladaInline(formDeuda);
+    return;
+  }
+
+  const formNuevoGasto = evento.target.closest('form.form-nuevo-gasto-inline');
+  if (formNuevoGasto) {
+    evento.preventDefault();
+    await guardarGastoNuevoInline(formNuevoGasto);
+    return;
+  }
+
+  const formMarcarGastoPagado = evento.target.closest('form.form-marcar-gasto-pagado-inline');
+  if (formMarcarGastoPagado) {
+    evento.preventDefault();
+    await guardarGastoPagadoInline(formMarcarGastoPagado);
   }
 });
 
@@ -1516,6 +1785,118 @@ if (elBtnImportarPagos && elInputImportarPagos) {
   elInputImportarPagos.addEventListener('change', () => {
     const archivo = elInputImportarPagos.files[0];
     if (archivo) importarPagosDesdeExcel(archivo);
+  });
+}
+
+// --- Importar Otros Gastos (opción oculta bajo "Más opciones") -----------
+//
+// Columnas esperadas: "RUC", "Descripción", "Monto", "Fecha del Cargo", y
+// opcionalmente "Pagado" (Sí/No -- vacío = No), "Forma de Pago", "N° de
+// Recibo", "Fecha de Pago". Si "Pagado" viene en Sí, Forma de Pago y Fecha
+// de Pago pasan a ser obligatorias en esa fila (mismo constraint que la
+// tabla, otros_gastos_honorarios_pagado_consistente). Cada fila válida
+// hace un INSERT en `otros_gastos_honorarios` -- igual que el importador
+// de pagos, no se detectan duplicados (reimportar el mismo archivo
+// duplica los gastos, aceptable para una carga inicial). Si el RUC no
+// existe en `clientes`, la fila se saltea con "cliente no encontrado".
+async function importarOtrosGastosDesdeExcel(archivo) {
+  if (!supabaseHonorarios) return;
+
+  elBtnImportarGastos.disabled = true;
+  elImportarResumenHonorarios.classList.add('oculto');
+
+  try {
+    const filas = await leerFilasDeArchivoExcel(archivo);
+
+    const { data: clientes, error: errorClientes } = await supabaseHonorarios.from('clientes').select('id, ruc');
+    if (errorClientes) throw errorClientes;
+
+    const idPorRuc = new Map((clientes || []).map((c) => [c.ruc.trim(), c.id]));
+
+    let insertados = 0;
+    const filasSalteadas = [];
+
+    for (let i = 0; i < filas.length; i += 1) {
+      const numeroFila = i + 2;
+      const fila = filas[i];
+
+      try {
+        const ruc = celdaTexto(fila['RUC']);
+        if (!ruc) throw new Error('RUC vacío.');
+
+        const clienteId = idPorRuc.get(ruc);
+        if (!clienteId) throw new Error('cliente no encontrado');
+
+        const descripcion = celdaTexto(fila['Descripción']);
+        if (!descripcion) throw new Error('Descripción vacía.');
+
+        const monto = celdaNumero(fila['Monto']);
+        if (monto === null || monto <= 0) throw new Error('Monto inválido.');
+
+        const fechaCargo = parsearFechaDeCeldaHonorarios(fila['Fecha del Cargo']);
+        if (!fechaCargo) throw new Error('Fecha del Cargo inválida (se espera dd/mm/aaaa o una fecha de Excel).');
+
+        const pagado = celdaEsAfirmativa(fila['Pagado']);
+
+        const datosGasto = {
+          cliente_id: clienteId,
+          descripcion,
+          monto,
+          fecha_cargo: fechaCargo,
+          pagado,
+          fecha_pago: null,
+          forma_pago: null,
+          numero_recibo: null,
+        };
+
+        if (pagado) {
+          const formaPagoTexto = celdaTexto(fila['Forma de Pago']).toLowerCase();
+          const formaPago = ['efectivo', 'transferencia', 'cheque'].includes(formaPagoTexto) ? formaPagoTexto : null;
+          if (!formaPago) throw new Error('Forma de Pago debe ser Efectivo, Transferencia o Cheque cuando Pagado es Sí.');
+
+          const fechaPago = parsearFechaDeCeldaHonorarios(fila['Fecha de Pago']);
+          if (!fechaPago) throw new Error('Fecha de Pago es obligatoria (dd/mm/aaaa o fecha de Excel) cuando Pagado es Sí.');
+
+          datosGasto.forma_pago = formaPago;
+          datosGasto.fecha_pago = fechaPago;
+          datosGasto.numero_recibo = celdaTexto(fila['N° de Recibo']) || null;
+        }
+
+        const { error } = await supabaseHonorarios.from('otros_gastos_honorarios').insert(datosGasto);
+        if (error) throw error;
+
+        insertados += 1;
+      } catch (errorFila) {
+        console.error(`Error al importar la fila ${numeroFila} del Excel de otros gastos:`, errorFila);
+        filasSalteadas.push({ fila: numeroFila, motivo: errorFila.message || 'Error desconocido.' });
+      }
+    }
+
+    mostrarResumenImportacionHonorarios(
+      'Importar Otros Gastos',
+      `Importación de Otros Gastos terminada: ${insertados} gasto(s) registrado(s).`,
+      filasSalteadas
+    );
+
+    if (insertados > 0) await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al importar otros gastos desde Excel:', error);
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    }
+  } finally {
+    elBtnImportarGastos.disabled = false;
+    elInputImportarGastos.value = '';
+  }
+}
+
+if (elBtnImportarGastos && elInputImportarGastos) {
+  elBtnImportarGastos.addEventListener('click', () => elInputImportarGastos.click());
+  elInputImportarGastos.addEventListener('change', () => {
+    const archivo = elInputImportarGastos.files[0];
+    if (archivo) importarOtrosGastosDesdeExcel(archivo);
   });
 }
 

@@ -277,6 +277,31 @@ input[type='search'] {
   margin-left: 0;
 }
 
+/* Importador de "Otros Gastos" (Honorarios): a propósito escondido detrás
+   de un <details> colapsado por defecto en vez de un botón grande junto a
+   los de Importar/Exportar de uso habitual -- ver comentario en
+   index.html. El <summary> se ve como un link chico (mismo color que
+   .boton-link) para que quede claro que es una opción secundaria, sin ser
+   imposible de encontrar. */
+.mas-opciones-excel {
+  margin-top: 10px;
+}
+
+.mas-opciones-excel summary {
+  cursor: pointer;
+  color: var(--color-marca);
+  font-size: 13px;
+  width: fit-content;
+}
+
+.mas-opciones-excel summary:hover {
+  text-decoration: underline;
+}
+
+.mas-opciones-excel .acciones-form {
+  margin-top: 10px;
+}
+
 .grupo-vencimiento {
   margin-bottom: 24px;
 }
