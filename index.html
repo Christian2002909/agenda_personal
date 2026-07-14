@@ -358,11 +358,12 @@
         <p id="sin-honorarios" class="sin-datos oculto">No hay clientes que coincidan con la búsqueda.</p>
       </section>
 
-      <!-- Cuota Anual: sección aparte, solo visible desde febrero (mismo mes
-           en que la cuota anual empieza a contar como "Debe") y solo si el
-           panel "panel_honorarios_cuota_anual" de Configuración > Paneles
+      <!-- Cuota Anual: sección aparte, solo visible desde febrero y solo si
+           el panel "panel_honorarios_cuota_anual" de Configuración > Paneles
            está activado. js/honorarios.js la oculta el resto del año o si
-           el panel está apagado. -->
+           el panel está apagado. La cuota anual NO suma sola al estado "Al
+           día"/"Debe" con el paso del tiempo (a diferencia de la mensual):
+           acá se activa a mano, por cliente, con "Activar cobro anual". -->
       <section class="tarjeta oculto" id="seccion-honorarios-anual">
         <h2>Cuota Anual</h2>
         <div class="tabla-scroll">
@@ -372,6 +373,7 @@
                 <th>Cliente</th>
                 <th>Cuota Anual</th>
                 <th>Estado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tabla-honorarios-anual-body">
@@ -591,13 +593,25 @@
   </div>
   <!-- fin #app-autenticado -->
 
-  <!-- Contenedor de la ficha de pago para imprimir/descargar como PDF.
-       Vive fuera de #app-autenticado y se mantiene oculto en pantalla; el
-       CSS de @media print (ver css/style.css) hace lo contrario: oculta
-       todo LO DEMÁS y muestra solo esto cuando se llama a window.print()
-       desde js/honorarios.js. Así no hace falta abrir una ventana nueva de
-       Electron para generar el PDF. -->
-  <div id="ficha-pago-imprimir" class="oculto"></div>
+  <!-- Contenedor de la ficha de pago para previsualizar/imprimir/descargar
+       como PDF. Vive fuera de #app-autenticado y se mantiene oculto hasta
+       que generarFichaPago() (js/honorarios.js) le saca la clase "oculto" --
+       a diferencia de antes, ya NO llama a window.print() directo: primero
+       se ve la ficha en pantalla (como quedaría el PDF) y recién se
+       imprime/descarga si se toca "Imprimir / Guardar PDF". El CSS de
+       @media print (ver css/style.css) oculta todo LO DEMÁS -- incluida la
+       barra de acciones de acá abajo, que no tiene que salir en el PDF -- y
+       muestra solo el contenido de la ficha. Así no hace falta abrir una
+       ventana nueva de Electron para generar el PDF. -->
+  <div id="ficha-pago-imprimir" class="ficha-preview-fondo oculto">
+    <div class="ficha-preview-tarjeta">
+      <div class="ficha-preview-acciones">
+        <button type="button" id="btn-ficha-imprimir" class="boton">Imprimir / Guardar PDF</button>
+        <button type="button" id="btn-ficha-cerrar" class="boton boton-secundario">Cerrar</button>
+      </div>
+      <div id="ficha-pago-contenido"></div>
+    </div>
+  </div>
 
   <!-- Cargamos los scripts con la lógica de cada pantalla. Adentro de
        clientes.js, presentaciones.js, historial.js y honorarios.js, con

@@ -531,6 +531,18 @@ create table if not exists public.honorarios (
     monto_mensual  numeric(14, 0),
     monto_anual    numeric(14, 0),
 
+    -- La cuota anual NO suma sola al estado "Al día"/"Debe" (a diferencia
+    -- de la mensual, que sí cuenta automáticamente los períodos
+    -- transcurridos): arranca en null (nunca se cobró) y el contador la
+    -- activa a mano ("Activar cobro anual" en Honorarios) el día que
+    -- corresponde cobrarla, lo que guarda ACÁ el momento de esa activación
+    -- (no un simple booleano) a propósito: calcularSaldoPorTipo('anual')
+    -- lo usa como ancla para no contar de nuevo pagos anuales de un ciclo
+    -- ANTERIOR ya saldado cuando se reactiva el cobro al año siguiente --
+    -- mismo criterio que `deudas_congeladas_honorarios.created_at`. Se
+    -- vuelve a null al "Desactivar cobro anual". Ver js/honorarios.js.
+    anual_habilitado_desde timestamptz,
+
     created_at     timestamptz not null default now(),
     updated_at     timestamptz not null default now(),
 
@@ -552,6 +564,7 @@ create table if not exists public.honorarios (
 -- se traslada el dato que tuvieran a la columna nueva que corresponda.
 alter table public.honorarios add column if not exists monto_mensual numeric(14, 0);
 alter table public.honorarios add column if not exists monto_anual numeric(14, 0);
+alter table public.honorarios add column if not exists anual_habilitado_desde timestamptz;
 
 do $$
 begin
@@ -584,6 +597,8 @@ alter table public.honorarios add constraint honorarios_al_menos_un_monto
 
 comment on table public.honorarios is
     'Honorario pactado por cliente (uno por cliente, ver unique constraint). Monto mensual y anual son independientes, un cliente puede tener uno, otro, o ambos. Deliberadamente NO tiene columna de estado "al día / debe": ese estado se deriva comparando esta tabla con pagos_honorarios para que nunca quede desincronizado de los pagos reales.';
+comment on column public.honorarios.anual_habilitado_desde is
+    'Momento en que se activó el cobro de la cuota anual (null = nunca se activó, no suma al estado "Al día"/"Debe" -- a diferencia de la mensual, no se cobra sola por tiempo transcurrido). Se activa a mano desde Honorarios cuando corresponde cobrarla; desde esa fecha se debe el monto_anual completo de una vez (no multiplicado por períodos), descontado por los pagos anuales registrados DESDE esa fecha (los de un ciclo anterior ya saldado no cuentan de nuevo). Vuelve a null al "Desactivar cobro anual".';
 
 -- ---------------------------------------------------------------------
 -- 11. TABLA pagos_honorarios

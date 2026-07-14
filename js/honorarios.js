@@ -81,6 +81,9 @@ const elTablaPagosBody = document.getElementById('tabla-pagos-body');
 const elSinPagos = document.getElementById('sin-pagos');
 
 const elFichaImprimir = document.getElementById('ficha-pago-imprimir');
+const elFichaContenido = document.getElementById('ficha-pago-contenido');
+const elBtnFichaImprimir = document.getElementById('btn-ficha-imprimir');
+const elBtnFichaCerrar = document.getElementById('btn-ficha-cerrar');
 
 // Cantidad de columnas de cualquier tabla que muestre filas de pago
 // (Historial de Pagos y el detalle de un cliente comparten exactamente las
@@ -423,34 +426,18 @@ function calcularAnclaPeriodo(fecha, periodicidad, cierreFiscalMes) {
   return new Date(anioEjercicioInicio, 0, 1);
 }
 
-// Cuenta cuántos períodos (meses o años) hay que pagar desde `fechaInicio`
-// (honorarios.created_at, o el created_at de la deuda congelada pendiente
-// más reciente si el cliente+tipo tiene una -- ver calcularSaldoPorTipo)
-// hasta el período vigente, ambos inclusive. Nunca da menos de 1 para la
-// cuota mensual.
-function contarPeriodosAdeudables(fechaInicio, periodicidad, cierreFiscalMes) {
-  const inicio = calcularAnclaPeriodo(fechaInicio, periodicidad, cierreFiscalMes);
-
-  if (periodicidad === 'mensual') {
-    const vigente = obtenerPeriodoVigente('mensual');
-    const meses = (vigente.getFullYear() - inicio.getFullYear()) * 12 + (vigente.getMonth() - inicio.getMonth()) + 1;
-    return Math.max(meses, 1);
-  }
-
-  const vigente = obtenerPeriodoVigente('anual', cierreFiscalMes);
-  let anios = Math.max(vigente.getFullYear() - inicio.getFullYear() + 1, 1);
-
-  // Regla de febrero (confirmada por el usuario): la cuota anual del
-  // período vigente no cuenta como adeudada hasta febrero de cada año, sin
-  // importar hace cuánto se configuró el honorario de ese cliente. Los
-  // ejercicios anteriores (ya cerrados hace rato) siguen contando igual
-  // que antes -- solo se descuenta el período vigente, y nunca por debajo
-  // de cero.
-  if (esEnero()) {
-    anios = Math.max(anios - 1, 0);
-  }
-
-  return anios;
+// Cuenta cuántos meses hay que pagar desde `fechaInicio` (honorarios.created_at,
+// o el created_at de la deuda congelada pendiente más reciente si el cliente
+// tiene una -- ver calcularSaldoPorTipo) hasta el período vigente, ambos
+// inclusive. Nunca da menos de 1. Solo se usa para la cuota MENSUAL: la
+// anual dejó de contarse por períodos transcurridos (ver calcularSaldoPorTipo
+// y el comentario de `anual_habilitado_desde` en schema.sql) -- se activa a
+// mano y se debe un monto único, no periodos × monto.
+function contarPeriodosAdeudables(fechaInicio, cierreFiscalMes) {
+  const inicio = calcularAnclaPeriodo(fechaInicio, 'mensual', cierreFiscalMes);
+  const vigente = obtenerPeriodoVigente('mensual');
+  const meses = (vigente.getFullYear() - inicio.getFullYear()) * 12 + (vigente.getMonth() - inicio.getMonth()) + 1;
+  return Math.max(meses, 1);
 }
 
 // --- Deudas congeladas (diferidas sin condonar) ---------------------------
@@ -477,24 +464,45 @@ function deudaCongeladaPendienteMasReciente(clienteId, tipoHonorario) {
 
 // Saldo pendiente de UNA de las dos cuotas (mensual o anual). Devuelve
 // null si el cliente no tiene esa cuota configurada.
+//
+// La anual es un caso especial (confirmado por el usuario): a diferencia de
+// la mensual, NO suma sola con el paso del tiempo -- mientras
+// honorario.anual_habilitado_desde sea null, esta función devuelve 0 para
+// 'anual' sin importar cuánto hace que se configuró. El contador la activa
+// a mano (botón "Activar cobro anual", ver dibujarSeccionHonorariosAnual) el
+// día que corresponde cobrarla, y desde ahí se debe el monto_anual completo
+// de una sola vez (no multiplicado por períodos como la mensual), descontado
+// por los pagos anuales registrados DESDE esa activación -- nunca por pagos
+// de un ciclo anterior ya saldado (si no, reactivar el cobro el año que
+// viene contaría el pago del año pasado como si fuera de este año y nunca
+// mostraría "Debe").
 function calcularSaldoPorTipo(honorario, cliente, tipoHonorario) {
   const monto = tipoHonorario === 'mensual' ? honorario.monto_mensual : honorario.monto_anual;
   if (monto === null || monto === undefined) return null;
 
   const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
-
   // Si hay una deuda vieja congelada pendiente para este cliente+tipo, el
   // cálculo corriente arranca de cero desde que se congeló (created_at de
-  // la más reciente) en vez de arrancar desde honorarios.created_at -- sin
-  // tocar ese created_at real, que sigue siendo la fecha de configuración
-  // real del honorario por si se usa en otro lado.
+  // la más reciente) en vez de arrancar desde el punto de partida normal --
+  // sin tocar ese punto de partida real, que sigue existiendo por si se usa
+  // en otro lado.
   const deudaCongelada = deudaCongeladaPendienteMasReciente(honorario.cliente_id, tipoHonorario);
+
+  if (tipoHonorario === 'anual') {
+    if (!honorario.anual_habilitado_desde) return 0;
+
+    const fechaInicio = deudaCongelada ? new Date(deudaCongelada.created_at) : new Date(honorario.anual_habilitado_desde);
+    const anclaPeriodoIso = formatearFechaISO(calcularAnclaPeriodo(fechaInicio, 'anual', cierreFiscalMes));
+    const totalPagado = pagosCache
+      .filter((pago) => pago.cliente_id === honorario.cliente_id && pago.tipo_honorario === 'anual' && pago.periodo >= anclaPeriodoIso)
+      .reduce((total, pago) => total + Number(pago.monto_pagado), 0);
+
+    return Math.max(Number(monto) - totalPagado, 0);
+  }
+
   const fechaInicio = deudaCongelada ? new Date(deudaCongelada.created_at) : new Date(honorario.created_at);
-
-  const periodos = contarPeriodosAdeudables(fechaInicio, tipoHonorario, cierreFiscalMes);
-
   let pagosDelTipo = pagosCache.filter(
-    (pago) => pago.cliente_id === honorario.cliente_id && pago.tipo_honorario === tipoHonorario
+    (pago) => pago.cliente_id === honorario.cliente_id && pago.tipo_honorario === 'mensual'
   );
 
   // Si el punto de partida se movió por una deuda congelada, los pagos de
@@ -503,12 +511,12 @@ function calcularSaldoPorTipo(honorario, cliente, tipoHonorario) {
   // porque si se restaran de nuevo un pago viejo contaría dos veces (una
   // en el monto congelado, otra acá) y el saldo corriente daría de menos.
   if (deudaCongelada) {
-    const anclaPeriodoIso = formatearFechaISO(calcularAnclaPeriodo(fechaInicio, tipoHonorario, cierreFiscalMes));
+    const anclaPeriodoIso = formatearFechaISO(calcularAnclaPeriodo(fechaInicio, 'mensual', cierreFiscalMes));
     pagosDelTipo = pagosDelTipo.filter((pago) => pago.periodo >= anclaPeriodoIso);
   }
 
   const totalPagado = pagosDelTipo.reduce((total, pago) => total + Number(pago.monto_pagado), 0);
-
+  const periodos = contarPeriodosAdeudables(fechaInicio, cierreFiscalMes);
   return Math.max(Number(monto) * periodos - totalPagado, 0);
 }
 
@@ -661,7 +669,7 @@ function dibujarSeccionHonorariosAnual() {
   });
 
   if (clientesConCuotaAnual.length === 0) {
-    elTablaHonorariosAnualBody.innerHTML = `<tr><td colspan="3" class="sin-datos">No hay clientes con cuota anual configurada.</td></tr>`;
+    elTablaHonorariosAnualBody.innerHTML = `<tr><td colspan="4" class="sin-datos">No hay clientes con cuota anual configurada.</td></tr>`;
     return;
   }
 
@@ -670,15 +678,65 @@ function dibujarSeccionHonorariosAnual() {
     const saldoAnual = calcularSaldoPorTipo(honorario, cliente, 'anual') ?? 0;
     const estadoAnual = { estado: saldoAnual > 0 ? 'debe' : 'al_dia', saldoPendiente: saldoAnual };
     const badgesDeudaCongeladaAnual = dibujarBadgesDeudaCongelada(cliente.id, 'anual');
+    // Mientras no se active, el botón invita a activarlo; una vez activado
+    // (ya sea "Debe" o ya se pagó y quedó "Al día"), se puede desactivar
+    // para el año que viene -- ver el listener de "click" más abajo.
+    const botonActivar = honorario.anual_habilitado_desde
+      ? `<button type="button" class="boton boton-chico" data-desactivar-anual-id="${cliente.id}">Desactivar cobro anual</button>`
+      : `<button type="button" class="boton boton-chico" data-activar-anual-id="${cliente.id}">Activar cobro anual</button>`;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${formatearGuaranies(honorario.monto_anual)}</td>
       <td>${dibujarBadgeEstado(estadoAnual)}${badgesDeudaCongeladaAnual ? `<br />${badgesDeudaCongeladaAnual}` : ''}</td>
+      <td>${botonActivar}</td>
     `;
     elTablaHonorariosAnualBody.appendChild(tr);
   }
+}
+
+// Activa/desactiva el cobro de la cuota anual de un cliente (ver
+// `anual_habilitado_desde` en schema.sql y calcularSaldoPorTipo). Al
+// activar guarda el momento exacto (ancla para no contar de nuevo pagos de
+// un ciclo anterior); al desactivar vuelve a null. Actualiza
+// honorariosCache en memoria antes de repintar para no tener que volver a
+// pedir toda la tabla de honorarios de nuevo.
+async function cambiarAnualHabilitado(clienteId, activar) {
+  const nuevoValor = activar ? new Date().toISOString() : null;
+
+  try {
+    const { error } = await supabaseHonorarios
+      .from('honorarios')
+      .update({ anual_habilitado_desde: nuevoValor })
+      .eq('cliente_id', clienteId);
+
+    if (error) throw error;
+
+    const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+    if (honorario) honorario.anual_habilitado_desde = nuevoValor;
+
+    dibujarTablaHonorarios();
+    dibujarSeccionHonorariosAnual();
+  } catch (error) {
+    console.error('Error al cambiar el cobro de la cuota anual:', error);
+    mostrarMensajeHonorarios('No se pudo guardar el cambio. Intentá de nuevo.', 'error');
+  }
+}
+
+if (elTablaHonorariosAnualBody) {
+  elTablaHonorariosAnualBody.addEventListener('click', (evento) => {
+    const botonActivar = evento.target.closest('button[data-activar-anual-id]');
+    if (botonActivar) {
+      cambiarAnualHabilitado(Number(botonActivar.dataset.activarAnualId), true);
+      return;
+    }
+
+    const botonDesactivar = evento.target.closest('button[data-desactivar-anual-id]');
+    if (botonDesactivar) {
+      cambiarAnualHabilitado(Number(botonDesactivar.dataset.desactivarAnualId), false);
+    }
+  });
 }
 
 // --- Filas expandibles de la tabla principal (pago / editar cuota / detalle) --
@@ -1651,12 +1709,14 @@ function construirTablaAnualFicha(cliente, honorario, anio) {
   `;
 }
 
-// Arma la ficha de pago del cliente en #ficha-pago-imprimir y dispara el
-// diálogo de impresión de Electron (desde ahí se puede elegir "Guardar
-// como PDF"). El membrete usa los datos propios del cliente si los tiene
-// cargados (clientes.membrete_*), y si no, el membrete general de
-// configuracion_estudio -- incluyendo el logo (configuracion_estudio.logo_base64)
-// si hay uno cargado; si no hay logo, la ficha se ve igual que siempre.
+// Arma la ficha de pago del cliente en #ficha-pago-contenido y la muestra
+// en pantalla como previsualización (ya no llama a window.print() directo
+// -- eso queda para cuando se toca "Imprimir / Guardar PDF" en la barra de
+// acciones, ver el listener más abajo). El membrete usa los datos propios
+// del cliente si los tiene cargados (clientes.membrete_*), y si no, el
+// membrete general de configuracion_estudio -- incluyendo el logo
+// (configuracion_estudio.logo_base64) si hay uno cargado; si no hay logo,
+// la ficha se ve igual que siempre.
 function generarFichaPago(cliente, honorario) {
   const anioActual = new Date().getFullYear();
   const nombreEstudio = cliente.membrete_nombre || configuracionEstudio?.nombre_estudio || 'Estudio Contable';
@@ -1687,9 +1747,23 @@ function generarFichaPago(cliente, honorario) {
     html += construirTablaAnualFicha(cliente, honorario, anioActual);
   }
 
-  elFichaImprimir.innerHTML = html;
-  window.print();
+  elFichaContenido.innerHTML = html;
+  elFichaImprimir.classList.remove('oculto');
 }
+
+if (elBtnFichaImprimir) {
+  elBtnFichaImprimir.addEventListener('click', () => window.print());
+}
+
+if (elBtnFichaCerrar) {
+  elBtnFichaCerrar.addEventListener('click', () => elFichaImprimir.classList.add('oculto'));
+}
+
+// Tocar el fondo (fuera de la tarjeta de la ficha) cierra la previsualización,
+// mismo criterio que un modal común -- clickear la ficha en sí no la cierra.
+elFichaImprimir.addEventListener('click', (evento) => {
+  if (evento.target === elFichaImprimir) elFichaImprimir.classList.add('oculto');
+});
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.
