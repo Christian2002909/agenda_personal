@@ -354,6 +354,13 @@ table.tabla-honorarios-grilla th {
   gap: 8px;
 }
 
+/* Columna "Ficha" del resumen por cliente de Historial de Pagos: botones
+   PDF/Excel uno al lado del otro. */
+.celda-ficha-resumen {
+  display: flex;
+  gap: 6px;
+}
+
 /* --- Secciones colapsables (Honorarios por Cliente / Historial de Pagos) -
    Arrancan cerradas (ver dibujarTablaHonorarios/dibujarTablaPagos, que las
    arman igual estén visibles o no) -- mismo truco de grid-template-rows

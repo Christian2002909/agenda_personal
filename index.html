@@ -359,9 +359,9 @@
         </div>
       </section>
 
-      <!-- Historial de pagos: arranca colapsada, igual que la de arriba.
-           "Descargar Excel"/"Ver PDF" exportan lo que esté FILTRADO por
-           Año/Mes en este momento (ver js/honorarios.js). -->
+      <!-- Historial de pagos: arranca colapsada, igual que la de arriba. Un
+           resumen por cliente, con una Ficha (PDF o Excel) descargable por
+           fila -- ver js/honorarios.js. -->
       <section class="tarjeta">
         <div class="seccion-colapsable-encabezado">
           <h2>Historial de Pagos</h2>
@@ -369,48 +369,21 @@
         </div>
         <div class="seccion-colapsable-grid" id="seccion-colapsable-historial-de-pagos">
           <div class="seccion-colapsable-contenido">
-            <div class="fila-form-filtros-pagos">
-              <div class="fila-form">
-                <label for="pagos-filtro-anio">Año</label>
-                <select id="pagos-filtro-anio">
-                  <option value="">Todos</option>
-                </select>
-              </div>
-              <div class="fila-form">
-                <label for="pagos-filtro-mes">Mes (cuota mensual)</label>
-                <select id="pagos-filtro-mes">
-                  <option value="">Todos</option>
-                  <option value="1">Enero</option>
-                  <option value="2">Febrero</option>
-                  <option value="3">Marzo</option>
-                  <option value="4">Abril</option>
-                  <option value="5">Mayo</option>
-                  <option value="6">Junio</option>
-                  <option value="7">Julio</option>
-                  <option value="8">Agosto</option>
-                  <option value="9">Setiembre</option>
-                  <option value="10">Octubre</option>
-                  <option value="11">Noviembre</option>
-                  <option value="12">Diciembre</option>
-                </select>
-              </div>
-              <div class="fila-form fila-form-botones">
-                <button type="button" id="btn-historial-pagos-excel" class="boton boton-secundario boton-chico">Descargar Excel</button>
-                <button type="button" id="btn-historial-pagos-pdf" class="boton boton-secundario boton-chico">Ver PDF</button>
-              </div>
-            </div>
+            <!-- Un resumen por cliente (no un listado de pagos sueltos): cuánto
+                 es su cuota mensual/anual y cuánto debe de cada una, más el
+                 monto de deuda congelada y de otros gastos pendientes. El
+                 detalle pago por pago (forma de pago, N° de recibo, fecha,
+                 período) queda solo en la Ficha descargable de cada cliente. -->
             <div class="tabla-scroll">
               <table class="tabla-clientes">
                 <thead>
                   <tr>
                     <th>Cliente</th>
-                    <th>Corresponde a</th>
-                    <th>Monto</th>
-                    <th>Forma de Pago</th>
-                    <th>N° Recibo</th>
-                    <th>Fecha de Pago</th>
-                    <th>Período</th>
-                    <th>Acciones</th>
+                    <th>Cuota Mensual</th>
+                    <th>Cuota Anual</th>
+                    <th>Deuda Congelada</th>
+                    <th>Otros Gastos</th>
+                    <th>Ficha</th>
                   </tr>
                 </thead>
                 <tbody id="tabla-pagos-body">
@@ -418,7 +391,7 @@
                 </tbody>
               </table>
             </div>
-            <p id="sin-pagos" class="sin-datos oculto">Todavía no se registró ningún pago.</p>
+            <p id="sin-pagos" class="sin-datos oculto">Todavía no hay ningún cliente con honorario configurado.</p>
           </div>
         </div>
       </section>
