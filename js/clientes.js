@@ -16,7 +16,8 @@
 // Nota: esta ruta es relativa a index.html (no a este archivo), porque así
 // resuelve Node los require() dentro de un <script> cargado en la ventana.
 const supabase = require('./js/supabaseClient.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaEsAfirmativa, celdaTexto, celdaNumero } = require('./js/excel-utils.js');
+const { leerFilasDeArchivoExcel, descargarComoExcel, celdaEsAfirmativa, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
+const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 // --- Referencias a elementos del HTML -----------------------------------
 const elMensaje = document.getElementById('mensaje');
@@ -89,6 +90,35 @@ function escaparHtml(texto) {
   div.textContent = texto ?? '';
   return div.innerHTML;
 }
+
+// Reformatea un input de dinero (cliente-honorario-mensual/anual) con el
+// punto separador de miles EN VIVO mientras se escribe, tratando de
+// mantener el cursor en una posición razonable (se cuentan los dígitos
+// antes del cursor y se lo recoloca después de esa misma cantidad de
+// dígitos en el texto ya formateado). El valor "real" (sin puntos) se
+// recupera con quitarPuntos() recién al guardar -- mismo patrón que usa
+// js/honorarios.js para sus propios inputs de dinero.
+function formatearInputDineroEnVivo(elInput) {
+  const posicionCursor = elInput.selectionStart ?? elInput.value.length;
+  const digitosAntesDelCursor = quitarPuntos(elInput.value.slice(0, posicionCursor)).length;
+
+  elInput.value = formatearConPuntos(elInput.value);
+
+  let digitosVistos = 0;
+  let nuevaPosicion = elInput.value.length;
+  for (let i = 0; i < elInput.value.length; i += 1) {
+    if (/\d/.test(elInput.value[i])) digitosVistos += 1;
+    if (digitosVistos === digitosAntesDelCursor) {
+      nuevaPosicion = i + 1;
+      break;
+    }
+  }
+  if (digitosAntesDelCursor === 0) nuevaPosicion = 0;
+  elInput.setSelectionRange(nuevaPosicion, nuevaPosicion);
+}
+
+elClienteHonorarioMensual.addEventListener('input', () => formatearInputDineroEnVivo(elClienteHonorarioMensual));
+elClienteHonorarioAnual.addEventListener('input', () => formatearInputDineroEnVivo(elClienteHonorarioAnual));
 
 // --- Carga inicial: solo el catálogo de obligaciones (para los checkboxes) ---
 
@@ -297,8 +327,8 @@ function abrirFormularioEdicion(cliente, honorario) {
   elClienteTerminacionRuc.value = cliente.terminacion_ruc ?? '';
   elClienteClaveMarangatu.value = cliente.clave_marangatu ?? '';
   elClienteCierreFiscalMes.value = cliente.cierre_fiscal_mes ?? 12;
-  elClienteHonorarioMensual.value = honorario?.monto_mensual ?? '';
-  elClienteHonorarioAnual.value = honorario?.monto_anual ?? '';
+  elClienteHonorarioMensual.value = formatearConPuntos(String(honorario?.monto_mensual ?? ''));
+  elClienteHonorarioAnual.value = formatearConPuntos(String(honorario?.monto_anual ?? ''));
 
   dibujarOpcionesResponsable();
   seleccionarResponsable(cliente.responsable_id, cliente.responsable);
@@ -313,8 +343,18 @@ elBtnCancelar.addEventListener('click', abrirFormularioNuevo);
 // Cuando el usuario escribe el RUC, sugerimos automáticamente la
 // terminación (el último dígito antes del guion), pero el usuario siempre
 // puede corregirla a mano después.
+//
+// Antes exigía `^(\d+)-\d$` -- todo el string tenía que ser EXACTAMENTE
+// "dígitos-un dígito" con el `$` anclado al final, así que no disparaba
+// hasta terminar de tipear el RUC COMPLETO, dígito verificador incluido.
+// Eso era innecesariamente estricto: la terminación sale del último dígito
+// de la base (antes del guion), no del dígito verificador, así que alcanza
+// con que ya haya un guion después de al menos un dígito para poder
+// sugerirla -- no hace falta esperar a que el campo quede en su forma
+// final. También tolera espacios pegados al guion (por si se pega un RUC
+// copiado de otro lado, ej. "80012345 - 6" o "80012345- 6").
 elClienteRuc.addEventListener('input', () => {
-  const coincidencia = elClienteRuc.value.match(/^(\d+)-\d$/);
+  const coincidencia = elClienteRuc.value.match(/^\s*(\d+)\s*-/);
   if (coincidencia) {
     const numeroSinDigitoVerificador = coincidencia[1];
     const ultimoDigito = numeroSinDigitoVerificador.slice(-1);
@@ -357,8 +397,10 @@ elForm.addEventListener('submit', async (evento) => {
     cierre_fiscal_mes: Number(elClienteCierreFiscalMes.value),
   };
 
-  const montoMensual = elClienteHonorarioMensual.value === '' ? null : Number(elClienteHonorarioMensual.value);
-  const montoAnual = elClienteHonorarioAnual.value === '' ? null : Number(elClienteHonorarioAnual.value);
+  const montoMensualTexto = quitarPuntos(elClienteHonorarioMensual.value);
+  const montoAnualTexto = quitarPuntos(elClienteHonorarioAnual.value);
+  const montoMensual = montoMensualTexto === '' ? null : Number(montoMensualTexto);
+  const montoAnual = montoAnualTexto === '' ? null : Number(montoAnualTexto);
 
   const idExistente = elClienteId.value;
   const obligacionesSeleccionadas = [...elClienteObligacionesCheckboxes.querySelectorAll('input[type="checkbox"]:checked')]
@@ -431,10 +473,11 @@ elForm.addEventListener('submit', async (evento) => {
 //
 // Columnas esperadas (ver también exportarClientesAExcel, que genera un
 // archivo con este mismo formato para usar de plantilla): "RUC", "Razón
-// Social", "Terminación RUC", "Clave Marangatu", "Cierre Fiscal (mes)", y
-// una columna más por cada obligación del catálogo (nombre exacto de
-// obligaciones.nombre, ej. "IVA", "RG 90 Mensual") con "Sí"/"No" (o vacía
-// = No) indicando si el cliente la tiene asignada.
+// Social", "Terminación RUC", "Clave Marangatu", "Cierre Fiscal (mes)",
+// "Cuota Mensual", "Cuota Anual", y una columna más por cada obligación del
+// catálogo (nombre exacto de obligaciones.nombre, ej. "IVA", "RG 90
+// Mensual") con "Sí"/"No" (o vacía = No) indicando si el cliente la tiene
+// asignada.
 //
 // Por fila: si el RUC ya existe (comparación exacta) se ACTUALIZA ese
 // cliente; si no existe, se crea. cliente_obligaciones se sincroniza con
@@ -453,6 +496,18 @@ elForm.addEventListener('submit', async (evento) => {
 // alta manual). Un cliente EXISTENTE actualizado por RUC no toca su
 // responsable/responsable_id actual -- el import solo pisa los campos que
 // realmente vienen en el Excel.
+//
+// Cuota Mensual / Cuota Anual: si la fila trae alguna de las dos, se hace
+// upsert sobre `honorarios` (onConflict cliente_id) -- mismo patrón que ya
+// usa el botón "Editar cuota" de Honorarios (js/honorarios.js,
+// guardarCuotaInline). Si el Excel NO trae esas columnas (o vienen vacías
+// para ese cliente), el honorario existente del cliente NO se toca -- a
+// diferencia del formulario manual de arriba (que si guarda con un campo
+// en blanco, lo interpreta como "sacar esa cuota"), acá una columna vacía
+// significa "no informado", no "borrar". Por eso no se puede resolver con
+// el mismo upsert de dos columnas a secas: si el cliente ya tenía honorario
+// configurado, se completa el valor no informado con el que ya tenía antes
+// de hacer el upsert (ver honorarioPorCliente más abajo).
 async function importarClientesDesdeExcel(archivo) {
   if (!supabase) return;
 
@@ -471,12 +526,20 @@ async function importarClientesDesdeExcel(archivo) {
       obligacionesCache = data || [];
     }
 
-    const { data: clientesExistentes, error: errorClientesExistentes } = await supabase
-      .from('clientes')
-      .select('id, ruc');
+    const [
+      { data: clientesExistentes, error: errorClientesExistentes },
+      { data: honorariosExistentes, error: errorHonorariosExistentes },
+    ] = await Promise.all([
+      supabase.from('clientes').select('id, ruc'),
+      supabase.from('honorarios').select('cliente_id, monto_mensual, monto_anual'),
+    ]);
     if (errorClientesExistentes) throw errorClientesExistentes;
+    if (errorHonorariosExistentes) throw errorHonorariosExistentes;
 
     const idPorRuc = new Map((clientesExistentes || []).map((c) => [c.ruc.trim(), c.id]));
+    const honorarioPorCliente = new Map(
+      (honorariosExistentes || []).map((h) => [h.cliente_id, { monto_mensual: h.monto_mensual, monto_anual: h.monto_anual }])
+    );
 
     const responsableTexto = perfilesCache.find((p) => p.id === usuarioActualId)?.nombre || 'Sin asignar';
 
@@ -516,6 +579,11 @@ async function importarClientesDesdeExcel(archivo) {
         }
 
         const claveMarangatu = celdaTexto(fila['Clave Marangatu']) || null;
+
+        const montoMensualExcel = celdaNumero(fila['Cuota Mensual']);
+        const montoAnualExcel = celdaNumero(fila['Cuota Anual']);
+        if (montoMensualExcel !== null && montoMensualExcel <= 0) throw new Error('Cuota Mensual debe ser mayor a 0.');
+        if (montoAnualExcel !== null && montoAnualExcel <= 0) throw new Error('Cuota Anual debe ser mayor a 0.');
 
         const obligacionesSeleccionadas = obligacionesCache
           .filter((obligacion) => celdaEsAfirmativa(fila[obligacion.nombre]))
@@ -570,6 +638,26 @@ async function importarClientesDesdeExcel(archivo) {
             .insert(obligacionesSeleccionadas.map((obligacionId) => ({ cliente_id: clienteId, obligacion_id: obligacionId })));
           if (errorInsertarObligaciones) throw errorInsertarObligaciones;
         }
+
+        // Cuota Mensual/Anual: solo tocamos `honorarios` si la fila trae
+        // alguna de las dos. Si el Excel no informó una de ellas para este
+        // cliente, se completa con el valor que ya tenía configurado (si
+        // tenía) en vez de pisarlo con null -- ver comentario grande de
+        // arriba de esta función.
+        if (montoMensualExcel !== null || montoAnualExcel !== null) {
+          const honorarioExistente = honorarioPorCliente.get(clienteId);
+          const montoMensualFinal = montoMensualExcel !== null ? montoMensualExcel : (honorarioExistente?.monto_mensual ?? null);
+          const montoAnualFinal = montoAnualExcel !== null ? montoAnualExcel : (honorarioExistente?.monto_anual ?? null);
+
+          const { error: errorHonorario } = await supabase
+            .from('honorarios')
+            .upsert(
+              { cliente_id: clienteId, monto_mensual: montoMensualFinal, monto_anual: montoAnualFinal },
+              { onConflict: 'cliente_id' }
+            );
+          if (errorHonorario) throw errorHonorario;
+          honorarioPorCliente.set(clienteId, { monto_mensual: montoMensualFinal, monto_anual: montoAnualFinal });
+        }
       } catch (errorFila) {
         console.error(`Error al importar la fila ${numeroFila} del Excel de clientes:`, errorFila);
         filasSalteadas.push({
@@ -586,7 +674,11 @@ async function importarClientesDesdeExcel(archivo) {
     if (creados > 0 || actualizados > 0) abrirFormularioNuevo();
   } catch (error) {
     console.error('Error al importar clientes desde Excel:', error);
-    mostrarMensaje('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error', true);
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensaje(error.message, 'error', true);
+    } else {
+      mostrarMensaje('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error', true);
+    }
   } finally {
     elBtnImportarClientes.disabled = false;
     elInputImportarClientes.value = '';
@@ -626,13 +718,20 @@ async function exportarClientesAExcel() {
 
   elBtnExportarClientes.disabled = true;
   try {
-    const [{ data: clientes, error: errorClientes }, { data: clienteObligaciones, error: errorClienteObligaciones }] =
-      await Promise.all([
-        supabase.from('clientes').select('*').order('razon_social'),
-        supabase.from('cliente_obligaciones').select('cliente_id, obligacion_id'),
-      ]);
+    const [
+      { data: clientes, error: errorClientes },
+      { data: clienteObligaciones, error: errorClienteObligaciones },
+      { data: honorarios, error: errorHonorarios },
+    ] = await Promise.all([
+      supabase.from('clientes').select('*').order('razon_social'),
+      supabase.from('cliente_obligaciones').select('cliente_id, obligacion_id'),
+      supabase.from('honorarios').select('cliente_id, monto_mensual, monto_anual'),
+    ]);
     if (errorClientes) throw errorClientes;
     if (errorClienteObligaciones) throw errorClienteObligaciones;
+    if (errorHonorarios) throw errorHonorarios;
+
+    const honorarioPorCliente = new Map((honorarios || []).map((h) => [h.cliente_id, h]));
 
     let catalogoObligaciones = obligacionesCache;
     if (catalogoObligaciones.length === 0) {
@@ -649,12 +748,15 @@ async function exportarClientesAExcel() {
 
     const filasExcel = (clientes || []).map((cliente) => {
       const asignadas = obligacionesPorCliente.get(cliente.id) || new Set();
+      const honorario = honorarioPorCliente.get(cliente.id);
       const filaExcel = {
         'RUC': cliente.ruc,
         'Razón Social': cliente.razon_social,
         'Terminación RUC': cliente.terminacion_ruc ?? '',
         'Clave Marangatu': cliente.clave_marangatu ?? '',
         'Cierre Fiscal (mes)': cliente.cierre_fiscal_mes ?? '',
+        'Cuota Mensual': honorario?.monto_mensual ?? '',
+        'Cuota Anual': honorario?.monto_anual ?? '',
       };
       for (const obligacion of catalogoObligaciones) {
         filaExcel[obligacion.nombre] = asignadas.has(obligacion.id) ? 'Sí' : 'No';
@@ -667,7 +769,11 @@ async function exportarClientesAExcel() {
     ]);
   } catch (error) {
     console.error('Error al exportar clientes a Excel:', error);
-    mostrarMensaje('No se pudo exportar el Excel de clientes.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensaje(error.message, 'error', true);
+    } else {
+      mostrarMensaje('No se pudo exportar el Excel de clientes.', 'error');
+    }
   } finally {
     elBtnExportarClientes.disabled = false;
   }

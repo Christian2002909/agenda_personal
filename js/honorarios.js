@@ -13,6 +13,18 @@
 // pagos históricos de esa misma cuota (tipo_honorario). El estado general
 // es "Debe" si cualquiera de las dos cuotas tiene saldo pendiente.
 //
+// "Congelar deuda" (tabla deudas_congeladas_honorarios): permite diferir
+// -sin perdonar- una deuda vieja de un cliente+tipo para que dicho estado
+// corriente deje de mostrar "Debe" apenas el cliente vuelve a pagar
+// puntual. Mientras un cliente+tipo tenga una deuda congelada pendiente
+// (pagada = false), calcularSaldoPorTipo arranca a contar períodos desde
+// el momento en que se congeló (created_at de esa fila) en vez de desde
+// honorarios.created_at -- "como si el honorario arrancara de cero" para
+// el cálculo corriente, sin tocar el created_at real. El monto congelado
+// en sí no se resta de nada: se muestra aparte, con un badge distinto al
+// de "Debe", hasta que se marca "pagada" (no genera un pago en
+// pagos_honorarios, ver comentario en schema.sql).
+//
 // Registrar un pago, editar la cuota pactada y ver el detalle de un
 // cliente se hacen todos expandiendo una fila-formulario debajo de la fila
 // del cliente en la tabla principal (mismo espíritu que el checkbox
@@ -34,14 +46,13 @@
 
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero } = require('./js/excel-utils.js');
+const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
+const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
 const elHonorariosBuscar = document.getElementById('honorarios-buscar');
 const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
 
-const elBtnImportarCuotas = document.getElementById('btn-importar-cuotas-excel');
-const elInputImportarCuotas = document.getElementById('input-importar-cuotas-excel');
 const elBtnImportarPagos = document.getElementById('btn-importar-pagos-excel');
 const elInputImportarPagos = document.getElementById('input-importar-pagos-excel');
 const elBtnExportarHonorarios = document.getElementById('btn-exportar-honorarios-excel');
@@ -74,6 +85,13 @@ const NOMBRES_MES_COMPLETOS = [
   'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
+// Versión abreviada, usada en el badge de "Deuda congelada" (ej. "dic.
+// 2026") para que no ocupe tanto espacio como la fecha completa dd/mm/aaaa.
+const MESES_ABREVIADOS = [
+  'ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.',
+  'jul.', 'ago.', 'set.', 'oct.', 'nov.', 'dic.',
+];
+
 const ETIQUETAS_FORMA_PAGO = {
   efectivo: 'Efectivo',
   transferencia: 'Transferencia',
@@ -91,6 +109,10 @@ const VALOR_CARTERA_TODOS = 'todos';
 let clientesCacheHonorarios = [];
 let honorariosCache = [];
 let pagosCache = [];
+// Deudas congeladas (tabla deudas_congeladas_honorarios): deuda vieja de
+// un cliente+tipo, diferida sin perdonarse -- ver contarPeriodosAdeudables
+// y dibujarBadgesDeudaCongelada más abajo.
+let deudasCongeladasCache = [];
 let configuracionEstudio = null;
 // Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
 let perfilesCache = [];
@@ -115,6 +137,13 @@ function formatearFechaVisibleHonorarios(fechaISO) {
   return `${dia}/${mes}/${anio}`;
 }
 
+// "dic. 2026" -- usado en el badge de "Deuda congelada" para la fecha de
+// acuerdo (fecha_acuerdo es un date "yyyy-mm-dd", sin hora).
+function formatearMesAnioCorto(fechaISO) {
+  const [anio, mes] = fechaISO.split('-');
+  return `${MESES_ABREVIADOS[Number(mes) - 1]} ${anio}`;
+}
+
 function formatearFormaPago(formaPago) {
   return ETIQUETAS_FORMA_PAGO[formaPago] || formaPago;
 }
@@ -123,6 +152,32 @@ function escaparHtmlHonorarios(texto) {
   const div = document.createElement('div');
   div.textContent = texto ?? '';
   return div.innerHTML;
+}
+
+// Reformatea un input de dinero (campo-pago-monto, campo-cuota-mensual,
+// campo-cuota-anual) con el punto separador de miles EN VIVO mientras se
+// escribe, tratando de mantener el cursor en una posición razonable (se
+// cuentan los dígitos antes del cursor y se lo recoloca después de esa
+// misma cantidad de dígitos en el texto ya formateado -- no hace falta que
+// sea perfecto, solo que no sea molesto de usar). El valor "real" (sin
+// puntos) se recupera con quitarPuntos() recién al guardar.
+function formatearInputDineroEnVivo(elInput) {
+  const posicionCursor = elInput.selectionStart ?? elInput.value.length;
+  const digitosAntesDelCursor = quitarPuntos(elInput.value.slice(0, posicionCursor)).length;
+
+  elInput.value = formatearConPuntos(elInput.value);
+
+  let digitosVistos = 0;
+  let nuevaPosicion = elInput.value.length;
+  for (let i = 0; i < elInput.value.length; i += 1) {
+    if (/\d/.test(elInput.value[i])) digitosVistos += 1;
+    if (digitosVistos === digitosAntesDelCursor) {
+      nuevaPosicion = i + 1;
+      break;
+    }
+  }
+  if (digitosAntesDelCursor === 0) nuevaPosicion = 0;
+  elInput.setSelectionRange(nuevaPosicion, nuevaPosicion);
 }
 
 // Enero es el único mes en que la cuota ANUAL todavía no cuenta como
@@ -218,6 +273,7 @@ async function cargarHonorarios() {
       { data: clientes, error: errorClientes },
       { data: honorarios, error: errorHonorarios },
       { data: pagos, error: errorPagos },
+      { data: deudasCongeladas, error: errorDeudasCongeladas },
       { data: configuracion, error: errorConfiguracion },
     ] = await Promise.all([
       supabaseHonorarios
@@ -226,17 +282,20 @@ async function cargarHonorarios() {
         .order('razon_social'),
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
+      supabaseHonorarios.from('deudas_congeladas_honorarios').select('*'),
       supabaseHonorarios.from('configuracion_estudio').select('*').eq('id', 1).maybeSingle(),
     ]);
 
     if (errorClientes) throw errorClientes;
     if (errorHonorarios) throw errorHonorarios;
     if (errorPagos) throw errorPagos;
+    if (errorDeudasCongeladas) throw errorDeudasCongeladas;
     if (errorConfiguracion) throw errorConfiguracion;
 
     clientesCacheHonorarios = clientes || [];
     honorariosCache = honorarios || [];
     pagosCache = pagos || [];
+    deudasCongeladasCache = deudasCongeladas || [];
     configuracionEstudio = configuracion || null;
 
     await Promise.all([cargarUsuarioActual(), cargarPerfiles()]);
@@ -258,21 +317,39 @@ async function cargarHonorarios() {
 
 // --- Tabla de honorarios por cliente -------------------------------------
 
-// Cuenta cuántos períodos (meses o años) hay que pagar desde que se
-// configuró el honorario (created_at) hasta el período vigente, ambos
-// inclusive. Nunca da menos de 1 para la cuota mensual.
-function contarPeriodosAdeudables(fechaCreacion, periodicidad, cierreFiscalMes) {
+// Fecha "ancla" del período en el que cae `fecha`: el primer día del mes
+// (mensual) o el 1º de enero del año en que arrancó el ejercicio fiscal
+// vigente en esa fecha (anual, misma convención que
+// obtenerPeriodoVigente()/pagos_honorarios.periodo, que siempre guarda el
+// 1º de enero del año de inicio de ejercicio, no el año de cierre). Se usa
+// tanto para contar cuántos períodos pasaron (contarPeriodosAdeudables)
+// como para decidir qué pagos entran en el cálculo corriente cuando hay
+// una deuda congelada (ver calcularSaldoPorTipo).
+function calcularAnclaPeriodo(fecha, periodicidad, cierreFiscalMes) {
   if (periodicidad === 'mensual') {
-    const inicio = new Date(fechaCreacion.getFullYear(), fechaCreacion.getMonth(), 1);
+    return new Date(fecha.getFullYear(), fecha.getMonth(), 1);
+  }
+  const mes = fecha.getMonth() + 1;
+  const anioEjercicioInicio = mes > cierreFiscalMes ? fecha.getFullYear() : fecha.getFullYear() - 1;
+  return new Date(anioEjercicioInicio, 0, 1);
+}
+
+// Cuenta cuántos períodos (meses o años) hay que pagar desde `fechaInicio`
+// (honorarios.created_at, o el created_at de la deuda congelada pendiente
+// más reciente si el cliente+tipo tiene una -- ver calcularSaldoPorTipo)
+// hasta el período vigente, ambos inclusive. Nunca da menos de 1 para la
+// cuota mensual.
+function contarPeriodosAdeudables(fechaInicio, periodicidad, cierreFiscalMes) {
+  const inicio = calcularAnclaPeriodo(fechaInicio, periodicidad, cierreFiscalMes);
+
+  if (periodicidad === 'mensual') {
     const vigente = obtenerPeriodoVigente('mensual');
     const meses = (vigente.getFullYear() - inicio.getFullYear()) * 12 + (vigente.getMonth() - inicio.getMonth()) + 1;
     return Math.max(meses, 1);
   }
 
-  const mesCreacion = fechaCreacion.getMonth() + 1;
-  const anioEjercicioInicio = mesCreacion > cierreFiscalMes ? fechaCreacion.getFullYear() : fechaCreacion.getFullYear() - 1;
   const vigente = obtenerPeriodoVigente('anual', cierreFiscalMes);
-  let anios = Math.max(vigente.getFullYear() - anioEjercicioInicio + 1, 1);
+  let anios = Math.max(vigente.getFullYear() - inicio.getFullYear() + 1, 1);
 
   // Regla de febrero (confirmada por el usuario): la cuota anual del
   // período vigente no cuenta como adeudada hasta febrero de cada año, sin
@@ -287,6 +364,28 @@ function contarPeriodosAdeudables(fechaCreacion, periodicidad, cierreFiscalMes) 
   return anios;
 }
 
+// --- Deudas congeladas (diferidas sin condonar) ---------------------------
+
+// Todas las deudas congeladas TODAVÍA pendientes (pagada = false) de un
+// cliente, sin importar el tipo -- para el badge y el panel de gestión.
+function deudasCongeladasPendientesDeCliente(clienteId) {
+  return deudasCongeladasCache.filter((deuda) => deuda.cliente_id === clienteId && !deuda.pagada);
+}
+
+// La deuda congelada pendiente MÁS RECIENTE (por created_at) de un
+// cliente+tipo puntual, o null si no tiene ninguna. Es la que determina el
+// nuevo punto de partida del cálculo corriente (ver calcularSaldoPorTipo).
+function deudaCongeladaPendienteMasReciente(clienteId, tipoHonorario) {
+  const pendientes = deudasCongeladasPendientesDeCliente(clienteId).filter(
+    (deuda) => deuda.tipo_honorario === tipoHonorario
+  );
+  if (pendientes.length === 0) return null;
+
+  return pendientes.reduce((masReciente, actual) =>
+    new Date(actual.created_at) > new Date(masReciente.created_at) ? actual : masReciente
+  );
+}
+
 // Saldo pendiente de UNA de las dos cuotas (mensual o anual). Devuelve
 // null si el cliente no tiene esa cuota configurada.
 function calcularSaldoPorTipo(honorario, cliente, tipoHonorario) {
@@ -294,11 +393,32 @@ function calcularSaldoPorTipo(honorario, cliente, tipoHonorario) {
   if (monto === null || monto === undefined) return null;
 
   const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
-  const periodos = contarPeriodosAdeudables(new Date(honorario.created_at), tipoHonorario, cierreFiscalMes);
 
-  const totalPagado = pagosCache
-    .filter((pago) => pago.cliente_id === honorario.cliente_id && pago.tipo_honorario === tipoHonorario)
-    .reduce((total, pago) => total + Number(pago.monto_pagado), 0);
+  // Si hay una deuda vieja congelada pendiente para este cliente+tipo, el
+  // cálculo corriente arranca de cero desde que se congeló (created_at de
+  // la más reciente) en vez de arrancar desde honorarios.created_at -- sin
+  // tocar ese created_at real, que sigue siendo la fecha de configuración
+  // real del honorario por si se usa en otro lado.
+  const deudaCongelada = deudaCongeladaPendienteMasReciente(honorario.cliente_id, tipoHonorario);
+  const fechaInicio = deudaCongelada ? new Date(deudaCongelada.created_at) : new Date(honorario.created_at);
+
+  const periodos = contarPeriodosAdeudables(fechaInicio, tipoHonorario, cierreFiscalMes);
+
+  let pagosDelTipo = pagosCache.filter(
+    (pago) => pago.cliente_id === honorario.cliente_id && pago.tipo_honorario === tipoHonorario
+  );
+
+  // Si el punto de partida se movió por una deuda congelada, los pagos de
+  // períodos ANTERIORES a ese punto ya quedaron reflejados en el monto que
+  // se congeló (lo tipeó quien la congeló) -- no se vuelven a restar acá,
+  // porque si se restaran de nuevo un pago viejo contaría dos veces (una
+  // en el monto congelado, otra acá) y el saldo corriente daría de menos.
+  if (deudaCongelada) {
+    const anclaPeriodoIso = formatearFechaISO(calcularAnclaPeriodo(fechaInicio, tipoHonorario, cierreFiscalMes));
+    pagosDelTipo = pagosDelTipo.filter((pago) => pago.periodo >= anclaPeriodoIso);
+  }
+
+  const totalPagado = pagosDelTipo.reduce((total, pago) => total + Number(pago.monto_pagado), 0);
 
   return Math.max(Number(monto) * periodos - totalPagado, 0);
 }
@@ -319,6 +439,29 @@ function dibujarBadgeEstado(resultado) {
   if (!resultado) return '<span class="texto-ayuda">Sin configurar</span>';
   if (resultado.estado === 'al_dia') return '<span class="badge badge-verde">Al día</span>';
   return `<span class="badge badge-rojo">Debe ${formatearGuaranies(resultado.saldoPendiente)}</span>`;
+}
+
+// Badge(s) secundario(s) de "Deuda congelada", aparte del badge principal
+// "Al día"/"Debe" -- con estilo neutro (ni verde ni rojo) a propósito, para
+// que no se lea como un mensaje urgente: es una deuda vieja que se sigue
+// debiendo, pero cuyo cobro quedó diferido a `fecha_acuerdo` y ya no cuenta
+// para el estado corriente. `tipoFiltro` ('mensual'/'anual'), si se pasa,
+// limita a las deudas de ese tipo y omite la etiqueta de tipo en el texto
+// (se usa desde la sección de Cuota Anual, donde el tipo ya es obvio por
+// contexto); sin filtro (tabla principal, que mezcla los dos tipos en una
+// sola fila) el texto aclara a cuál corresponde cada una.
+function dibujarBadgesDeudaCongelada(clienteId, tipoFiltro = null) {
+  const pendientes = deudasCongeladasPendientesDeCliente(clienteId).filter(
+    (deuda) => !tipoFiltro || deuda.tipo_honorario === tipoFiltro
+  );
+  if (pendientes.length === 0) return '';
+
+  return pendientes
+    .map((deuda) => {
+      const prefijoTipo = tipoFiltro ? '' : `${deuda.tipo_honorario === 'mensual' ? 'Mensual' : 'Anual'}: `;
+      return `<span class="badge badge-neutro" title="Deuda vieja congelada: se sigue debiendo, pero no cuenta para el estado corriente hasta la fecha de acuerdo">Deuda congelada -- ${prefijoTipo}${formatearGuaranies(deuda.monto)} (${formatearMesAnioCorto(deuda.fecha_acuerdo)})</span>`;
+    })
+    .join(' ');
 }
 
 function dibujarTablaHonorarios() {
@@ -345,18 +488,20 @@ function dibujarTablaHonorarios() {
   for (const cliente of clientesFiltrados) {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
     const resultado = calcularEstadoHonorario(honorario, cliente);
+    const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
 
     const filaCliente = document.createElement('tr');
     filaCliente.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${honorario?.monto_mensual ? formatearGuaranies(honorario.monto_mensual) : '—'}</td>
       <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
-      <td>${dibujarBadgeEstado(resultado)}</td>
+      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}</td>
       <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
       <td>
         <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
         <button type="button" class="boton boton-chico" data-editar-cuota-id="${cliente.id}">Editar cuota</button>
         <button type="button" class="boton boton-chico" data-detalle-cliente-id="${cliente.id}">Detalle</button>
+        <button type="button" class="boton boton-chico" data-congelar-deuda-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Deuda congelada</button>
       </td>
     `;
     elTablaHonorariosBody.appendChild(filaCliente);
@@ -406,12 +551,13 @@ function dibujarSeccionHonorariosAnual() {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
     const saldoAnual = calcularSaldoPorTipo(honorario, cliente, 'anual') ?? 0;
     const estadoAnual = { estado: saldoAnual > 0 ? 'debe' : 'al_dia', saldoPendiente: saldoAnual };
+    const badgesDeudaCongeladaAnual = dibujarBadgesDeudaCongelada(cliente.id, 'anual');
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${formatearGuaranies(honorario.monto_anual)}</td>
-      <td>${dibujarBadgeEstado(estadoAnual)}</td>
+      <td>${dibujarBadgeEstado(estadoAnual)}${badgesDeudaCongeladaAnual ? `<br />${badgesDeudaCongeladaAnual}` : ''}</td>
     `;
     elTablaHonorariosAnualBody.appendChild(tr);
   }
@@ -532,7 +678,7 @@ function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
         ${selectorTipoHtml}
         <div class="fila-form">
           <label>Monto Pagado (Gs.)</label>
-          <input type="number" class="campo-pago-monto" min="1" step="1" required value="${montoInicial}" />
+          <input type="text" inputmode="numeric" class="campo-pago-monto" required value="${formatearConPuntos(String(montoInicial))}" />
         </div>
         <div class="fila-form">
           <label>Forma de Pago</label>
@@ -583,7 +729,7 @@ function actualizarCamposSegunTipoInline(selectTipo) {
 
   const montoInput = form.querySelector('.campo-pago-monto');
   const montoSugerido = tipo === 'mensual' ? honorario?.monto_mensual : honorario?.monto_anual;
-  if (montoInput && montoSugerido) montoInput.value = montoSugerido;
+  if (montoInput && montoSugerido) montoInput.value = formatearConPuntos(String(montoSugerido));
 
   const contenedorPeriodo = form.querySelector('.campo-pago-periodo-contenedor');
   if (contenedorPeriodo) {
@@ -596,7 +742,7 @@ async function guardarPagoInline(form) {
   const pagoId = form.dataset.pagoId ? Number(form.dataset.pagoId) : null;
 
   const tipo = form.querySelector('.campo-pago-tipo').value;
-  const monto = Number(form.querySelector('.campo-pago-monto').value);
+  const monto = Number(quitarPuntos(form.querySelector('.campo-pago-monto').value));
   const forma = form.querySelector('.campo-pago-forma').value;
   const recibo = form.querySelector('.campo-pago-recibo').value.trim() || null;
   const fecha = form.querySelector('.campo-pago-fecha').value || formatearFechaISO(new Date());
@@ -642,11 +788,11 @@ function construirFormularioEditarCuotaHtml(cliente, honorario) {
       <div class="grilla-form-inline">
         <div class="fila-form">
           <label>Cuota Mensual (Gs.)</label>
-          <input type="number" class="campo-cuota-mensual" min="1" step="1" value="${honorario?.monto_mensual ?? ''}" />
+          <input type="text" inputmode="numeric" class="campo-cuota-mensual" value="${formatearConPuntos(String(honorario?.monto_mensual ?? ''))}" />
         </div>
         <div class="fila-form">
           <label>Cuota Anual (Gs.)</label>
-          <input type="number" class="campo-cuota-anual" min="1" step="1" value="${honorario?.monto_anual ?? ''}" />
+          <input type="text" inputmode="numeric" class="campo-cuota-anual" value="${formatearConPuntos(String(honorario?.monto_anual ?? ''))}" />
         </div>
       </div>
       <div class="acciones-form">
@@ -666,8 +812,8 @@ function abrirFormularioEditarCuota(clienteId) {
 
 async function guardarCuotaInline(form) {
   const clienteId = Number(form.dataset.clienteId);
-  const montoMensualTexto = form.querySelector('.campo-cuota-mensual').value;
-  const montoAnualTexto = form.querySelector('.campo-cuota-anual').value;
+  const montoMensualTexto = quitarPuntos(form.querySelector('.campo-cuota-mensual').value);
+  const montoAnualTexto = quitarPuntos(form.querySelector('.campo-cuota-anual').value);
   const montoMensual = montoMensualTexto ? Number(montoMensualTexto) : null;
   const montoAnual = montoAnualTexto ? Number(montoAnualTexto) : null;
 
@@ -694,6 +840,134 @@ async function guardarCuotaInline(form) {
   } catch (error) {
     console.error('Error al guardar la cuota:', error);
     mostrarMensajeHonorarios('No se pudo guardar la cuota.', 'error');
+  }
+}
+
+// --- Congelar deuda vieja (diferir el cobro sin condonarla) ---------------
+//
+// Mismo espíritu de fila-expandible que el resto de esta pantalla: un
+// panel que junto muestra las deudas congeladas pendientes del cliente
+// (con botón "Marcar cobrada" cada una) y un mini-formulario para congelar
+// una deuda nueva (monto + fecha de acuerdo). Ver comentario largo al
+// principio del archivo y en schema.sql (tabla deudas_congeladas_honorarios)
+// para el diseño completo.
+
+function construirFormularioCongelarDeudaHtml(cliente, honorario) {
+  const tieneMensual = honorario.monto_mensual !== null && honorario.monto_mensual !== undefined;
+  const tieneAnual = honorario.monto_anual !== null && honorario.monto_anual !== undefined;
+  const tipoInicial = tieneMensual ? 'mensual' : 'anual';
+
+  const selectorTipoHtml = (tieneMensual && tieneAnual)
+    ? `
+      <div class="fila-form">
+        <label>Corresponde a</label>
+        <select class="campo-deuda-tipo">
+          <option value="mensual">Cuota Mensual</option>
+          <option value="anual">Cuota Anual</option>
+        </select>
+      </div>`
+    : `<input type="hidden" class="campo-deuda-tipo" value="${tipoInicial}" />`;
+
+  const pendientes = deudasCongeladasPendientesDeCliente(cliente.id);
+  const listaPendientesHtml = pendientes.length
+    ? `
+      <ul class="lista-resumen-importacion">
+        ${pendientes
+          .map((deuda) => `
+            <li>
+              ${deuda.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual'}:
+              ${formatearGuaranies(deuda.monto)} -- se espera cobrar el ${formatearFechaVisibleHonorarios(deuda.fecha_acuerdo)}
+              <button type="button" class="boton boton-chico" data-marcar-deuda-pagada-id="${deuda.id}">Marcar cobrada</button>
+            </li>
+          `)
+          .join('')}
+      </ul>`
+    : '<p class="sin-datos">Este cliente no tiene deuda congelada pendiente.</p>';
+
+  return `
+    <div class="detalle-cliente-inline">
+      <h3 class="fila-form-titulo">Deuda Congelada — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      ${listaPendientesHtml}
+      <form class="form-congelar-deuda-inline" data-cliente-id="${cliente.id}">
+        <h3 class="fila-form-titulo">Congelar deuda nueva</h3>
+        <div class="grilla-form-inline">
+          ${selectorTipoHtml}
+          <div class="fila-form">
+            <label>Monto Congelado (Gs.)</label>
+            <input type="text" inputmode="numeric" class="campo-deuda-monto" required />
+          </div>
+          <div class="fila-form">
+            <label>Fecha de Acuerdo (se espera cobrar)</label>
+            <input type="date" class="campo-deuda-fecha-acuerdo" required />
+          </div>
+        </div>
+        <div class="acciones-form">
+          <button type="submit" class="boton boton-primario boton-chico">Congelar Deuda</button>
+          <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function abrirFormularioCongelarDeuda(clienteId) {
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+  const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+  if (!cliente || !honorario) return;
+  abrirFilaExpandible(clienteId, construirFormularioCongelarDeudaHtml(cliente, honorario));
+}
+
+async function guardarDeudaCongeladaInline(form) {
+  const clienteId = Number(form.dataset.clienteId);
+  const tipo = form.querySelector('.campo-deuda-tipo').value;
+  const monto = Number(quitarPuntos(form.querySelector('.campo-deuda-monto').value));
+  const fechaAcuerdo = form.querySelector('.campo-deuda-fecha-acuerdo').value;
+
+  if (!monto || monto <= 0) {
+    mostrarMensajeHonorarios('Cargá un monto congelado válido.', 'error');
+    return;
+  }
+  if (!fechaAcuerdo) {
+    mostrarMensajeHonorarios('Cargá la fecha en la que se espera cobrar la deuda.', 'error');
+    return;
+  }
+
+  try {
+    const { error } = await supabaseHonorarios.from('deudas_congeladas_honorarios').insert({
+      cliente_id: clienteId,
+      tipo_honorario: tipo,
+      monto,
+      fecha_acuerdo: fechaAcuerdo,
+    });
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Deuda congelada correctamente: ya no cuenta para el estado corriente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al congelar la deuda:', error);
+    mostrarMensajeHonorarios('No se pudo congelar la deuda.', 'error');
+  }
+}
+
+// Se marca "pagada" cuando finalmente se cobra la deuda vieja. A propósito
+// NO genera un pago en pagos_honorarios (ver comentario en schema.sql):
+// este monto no corresponde a un período puntual, sino a la suma de
+// varios períodos viejos, así que mezclarlo en pagos_honorarios rompería
+// la reconciliación período-por-período que hace la ficha de pago
+// imprimible. Queda resuelta acá mismo, aparte.
+async function marcarDeudaCongeladaPagada(deudaId) {
+  try {
+    const { error } = await supabaseHonorarios
+      .from('deudas_congeladas_honorarios')
+      .update({ pagada: true, fecha_pago: formatearFechaISO(new Date()) })
+      .eq('id', deudaId);
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Deuda congelada marcada como cobrada.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al marcar la deuda congelada como cobrada:', error);
+    mostrarMensajeHonorarios('No se pudo marcar la deuda como cobrada.', 'error');
   }
 }
 
@@ -730,10 +1004,13 @@ function construirDetalleClienteHtml(cliente) {
     ? pagosCliente.map((pago) => construirFilaPagoHtml(pago, cliente)).join('')
     : `<tr><td colspan="${PAGO_COLSPAN}" class="sin-datos">Todavía no se registró ningún pago.</td></tr>`;
 
+  const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+
   return `
     <div class="detalle-cliente-inline">
       <h3 class="fila-form-titulo">Historial de Pagos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
       <p>Saldo pendiente: ${dibujarBadgeEstado(resultado)}</p>
+      ${badgesDeudaCongelada ? `<p>${badgesDeudaCongelada}</p>` : ''}
       <div class="tabla-scroll">
         <table class="tabla-clientes">
           <thead>
@@ -792,6 +1069,14 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
   }
 });
 
+// Formato de miles en vivo para los inputs de dinero de los mini-formularios
+// (pago, editar cuota y congelar deuda), armados dinámicamente dentro de
+// esta tabla.
+elTablaHonorariosBody.addEventListener('input', (evento) => {
+  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual, .campo-deuda-monto');
+  if (campoDinero) formatearInputDineroEnVivo(campoDinero);
+});
+
 elTablaHonorariosBody.addEventListener('click', (evento) => {
   const botonFicha = evento.target.closest('button[data-ficha-cliente-id]');
   if (botonFicha) {
@@ -811,6 +1096,18 @@ elTablaHonorariosBody.addEventListener('click', (evento) => {
   const botonDetalle = evento.target.closest('button[data-detalle-cliente-id]');
   if (botonDetalle) {
     abrirDetalleCliente(Number(botonDetalle.dataset.detalleClienteId));
+    return;
+  }
+
+  const botonCongelarDeuda = evento.target.closest('button[data-congelar-deuda-id]');
+  if (botonCongelarDeuda) {
+    abrirFormularioCongelarDeuda(Number(botonCongelarDeuda.dataset.congelarDeudaId));
+    return;
+  }
+
+  const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
+  if (botonMarcarDeudaPagada) {
+    marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));
     return;
   }
 
@@ -847,6 +1144,13 @@ elTablaHonorariosBody.addEventListener('submit', async (evento) => {
   if (formCuota) {
     evento.preventDefault();
     await guardarCuotaInline(formCuota);
+    return;
+  }
+
+  const formDeuda = evento.target.closest('form.form-congelar-deuda-inline');
+  if (formDeuda) {
+    evento.preventDefault();
+    await guardarDeudaCongeladaInline(formDeuda);
   }
 });
 
@@ -1055,11 +1359,15 @@ function generarFichaPago(cliente, honorario) {
 
 // --- Importar / Exportar Excel --------------------------------------------
 //
-// Dos importadores SEPARADOS (dos botones, dos archivos .xlsx distintos --
-// no es un solo Excel con varias hojas), más un exportador único con dos
-// hojas (Honorarios + Historial de Pagos, ver exportarHonorariosAExcel).
-// Comparten el mismo bloque de resumen (#honorarios-importar-resumen): se
-// reescribe con el título de cuál de los dos corrió por última vez.
+// La cuota mensual/anual pactada YA NO se importa desde acá -- se sacó el
+// botón "Importar Cuotas desde Excel" que existía antes: ahora esas dos
+// columnas se cargan junto con el resto de los datos del cliente en el
+// importador de Clientes (ver importarClientesDesdeExcel en js/clientes.js).
+// Acá solo queda el importador del historial de pagos, más un exportador
+// único con dos hojas (Honorarios + Historial de Pagos, ver
+// exportarHonorariosAExcel). El bloque de resumen
+// (#honorarios-importar-resumen) sigue existiendo por si en el futuro se
+// suma otro importador a esta pantalla.
 
 function mostrarResumenImportacionHonorarios(titulo, resumenTexto, filasSalteadas) {
   elImportarResumenHonorariosTitulo.textContent = titulo;
@@ -1095,103 +1403,6 @@ function parsearFechaDeCeldaHonorarios(valor) {
   }
 
   return null;
-}
-
-// --- Importar Cuotas (RUC + Cuota Mensual + Cuota Anual) ------------------
-//
-// Columnas esperadas: "RUC", "Cuota Mensual", "Cuota Anual" (al menos una
-// de las dos debe venir cargada). Por cada fila con un RUC que exista en
-// `clientes`, hace upsert sobre `honorarios` (onConflict cliente_id) --
-// mismo patrón que ya usa guardarCuotaInline() al editar la cuota desde
-// la interfaz. Si el RUC no existe, la fila se saltea con el motivo
-// "cliente no encontrado" (este importador no crea clientes nuevos, eso
-// es trabajo del importador de Clientes).
-async function importarCuotasDesdeExcel(archivo) {
-  if (!supabaseHonorarios) return;
-
-  elBtnImportarCuotas.disabled = true;
-  elImportarResumenHonorarios.classList.add('oculto');
-
-  try {
-    const filas = await leerFilasDeArchivoExcel(archivo);
-
-    const [{ data: clientes, error: errorClientes }, { data: honorariosExistentes, error: errorHonorarios }] =
-      await Promise.all([
-        supabaseHonorarios.from('clientes').select('id, ruc'),
-        supabaseHonorarios.from('honorarios').select('cliente_id'),
-      ]);
-    if (errorClientes) throw errorClientes;
-    if (errorHonorarios) throw errorHonorarios;
-
-    const idPorRuc = new Map((clientes || []).map((c) => [c.ruc.trim(), c.id]));
-    const clientesConHonorario = new Set((honorariosExistentes || []).map((h) => h.cliente_id));
-
-    let creados = 0;
-    let actualizados = 0;
-    const filasSalteadas = [];
-
-    for (let i = 0; i < filas.length; i += 1) {
-      const numeroFila = i + 2;
-      const fila = filas[i];
-
-      try {
-        const ruc = celdaTexto(fila['RUC']);
-        if (!ruc) throw new Error('RUC vacío.');
-
-        const clienteId = idPorRuc.get(ruc);
-        if (!clienteId) throw new Error('cliente no encontrado');
-
-        const montoMensual = celdaNumero(fila['Cuota Mensual']);
-        const montoAnual = celdaNumero(fila['Cuota Anual']);
-
-        if (montoMensual === null && montoAnual === null) {
-          throw new Error('Debe cargar Cuota Mensual y/o Cuota Anual.');
-        }
-        if (montoMensual !== null && montoMensual <= 0) throw new Error('Cuota Mensual debe ser mayor a 0.');
-        if (montoAnual !== null && montoAnual <= 0) throw new Error('Cuota Anual debe ser mayor a 0.');
-
-        const { error } = await supabaseHonorarios
-          .from('honorarios')
-          .upsert(
-            { cliente_id: clienteId, monto_mensual: montoMensual, monto_anual: montoAnual },
-            { onConflict: 'cliente_id' }
-          );
-        if (error) throw error;
-
-        if (clientesConHonorario.has(clienteId)) {
-          actualizados += 1;
-        } else {
-          creados += 1;
-          clientesConHonorario.add(clienteId); // por si el mismo RUC se repite más abajo en el archivo
-        }
-      } catch (errorFila) {
-        console.error(`Error al importar la fila ${numeroFila} del Excel de cuotas:`, errorFila);
-        filasSalteadas.push({ fila: numeroFila, motivo: errorFila.message || 'Error desconocido.' });
-      }
-    }
-
-    mostrarResumenImportacionHonorarios(
-      'Importar Cuotas',
-      `Importación de Cuotas terminada: ${creados} creada(s), ${actualizados} actualizada(s).`,
-      filasSalteadas
-    );
-
-    if (creados > 0 || actualizados > 0) await cargarHonorarios();
-  } catch (error) {
-    console.error('Error al importar cuotas desde Excel:', error);
-    mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
-  } finally {
-    elBtnImportarCuotas.disabled = false;
-    elInputImportarCuotas.value = '';
-  }
-}
-
-if (elBtnImportarCuotas && elInputImportarCuotas) {
-  elBtnImportarCuotas.addEventListener('click', () => elInputImportarCuotas.click());
-  elInputImportarCuotas.addEventListener('change', () => {
-    const archivo = elInputImportarCuotas.files[0];
-    if (archivo) importarCuotasDesdeExcel(archivo);
-  });
 }
 
 // --- Importar Historial de Pagos -------------------------------------------
@@ -1289,7 +1500,11 @@ async function importarPagosDesdeExcel(archivo) {
     if (insertados > 0) await cargarHonorarios();
   } catch (error) {
     console.error('Error al importar pagos desde Excel:', error);
-    mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
+    }
   } finally {
     elBtnImportarPagos.disabled = false;
     elInputImportarPagos.value = '';
@@ -1353,7 +1568,11 @@ async function exportarHonorariosAExcel() {
     ]);
   } catch (error) {
     console.error('Error al exportar honorarios a Excel:', error);
-    mostrarMensajeHonorarios('No se pudo exportar el Excel de honorarios.', 'error');
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensajeHonorarios(error.message, 'error');
+    } else {
+      mostrarMensajeHonorarios('No se pudo exportar el Excel de honorarios.', 'error');
+    }
   } finally {
     elBtnExportarHonorarios.disabled = false;
   }

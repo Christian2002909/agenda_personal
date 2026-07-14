@@ -22,6 +22,8 @@ const elLoginMensaje = document.getElementById('login-mensaje');
 const elBtnLogout = document.getElementById('btn-logout');
 const elUsuarioActual = document.getElementById('usuario-actual');
 const elBtnOlvideContrasena = document.getElementById('btn-olvide-contrasena');
+const elBannerSinPerfil = document.getElementById('banner-sin-perfil');
+const elBtnIrACompletarPerfil = document.getElementById('btn-ir-a-completar-perfil');
 
 function mostrarMensajeLogin(texto, tipo = 'error') {
   elLoginMensaje.textContent = texto;
@@ -44,6 +46,49 @@ function actualizarPantallaSegunSesion(sesion) {
   const botonVistaActiva = document.querySelector('.nav-boton.activo');
   if (botonVistaActiva && typeof window.mostrarVista === 'function') {
     window.mostrarVista(botonVistaActiva.dataset.vista);
+  }
+
+  // Detectamos acá, apenas se confirma la sesión, si el usuario logueado
+  // tiene su propia fila en `perfiles` -- caso típico: el primer admin,
+  // creado a mano en el dashboard de Supabase antes de que existiera
+  // "Crear Responsable" en Configuración, nunca tuvo perfil propio y no
+  // puede identificarse como responsable de sus propios clientes (ver
+  // docs/PEDIDOS_PENDIENTES.md, "Pantalla Configuración / Clientes").
+  verificarPerfilPropio(sesion.user.id);
+}
+
+// Muestra/oculta el banner global "no tenés tu propio perfil" (index.html,
+// fuera de las vistas para que se vea sin importar la pestaña activa). Se
+// vuelve a llamar sola tras cada login/logout, y queda expuesta en
+// "window" para que js/configuracion.js la dispare de nuevo apenas el
+// propio usuario crea su perfil (pestaña Usuarios), sin esperar a un
+// próximo login -- mismo mecanismo de comunicación entre pantallas que ya
+// usa el resto de la app (ver CLAUDE.md, "cross-file communication").
+async function verificarPerfilPropio(usuarioId) {
+  if (!elBannerSinPerfil) return;
+
+  if (!usuarioId) {
+    elBannerSinPerfil.classList.add('oculto');
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseAuth
+      .from('perfiles')
+      .select('id')
+      .eq('id', usuarioId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    // Si ya existe la fila, ocultamos el aviso; si no existe (data null),
+    // lo mostramos.
+    elBannerSinPerfil.classList.toggle('oculto', Boolean(data));
+  } catch (error) {
+    console.error('Error al verificar si el usuario logueado tiene su propio perfil en "perfiles":', error);
+    // Ante un error de red/consulta no mostramos el aviso por las dudas --
+    // no queremos alarmar de más si en realidad sí tiene perfil y solo
+    // falló esta consulta puntual; la próxima carga lo vuelve a intentar.
   }
 }
 
@@ -85,6 +130,28 @@ if (!supabaseAuth) {
   });
 
   elBtnLogout.addEventListener('click', () => supabaseAuth.auth.signOut());
+
+  // Botón del banner "Completar mi perfil": lleva directo a Configuración →
+  // Usuarios, donde vive el formulario de autoregistro (ver js/configuracion.js,
+  // tarjeta "Tu perfil"). mostrarPestanaUsuariosConfiguracion() la expone
+  // configuracion.js -- mismo patrón que window.mostrarVista/window.editarClienteDesdeOtraVista.
+  if (elBtnIrACompletarPerfil) {
+    elBtnIrACompletarPerfil.addEventListener('click', () => {
+      if (typeof window.mostrarVista === 'function') {
+        window.mostrarVista('vista-configuracion');
+      }
+      if (typeof window.mostrarPestanaUsuariosConfiguracion === 'function') {
+        window.mostrarPestanaUsuariosConfiguracion();
+      }
+    });
+  }
+
+  // Expuesta para que js/configuracion.js pueda refrescar el banner apenas
+  // el propio usuario crea su perfil, sin esperar a un próximo login.
+  window.verificarPerfilPropio = () =>
+    supabaseAuth.auth
+      .getSession()
+      .then(({ data }) => verificarPerfilPropio(data?.session?.user?.id));
 
   // "Olvidé mi contraseña": Supabase manda el mail de recuperación si el
   // email existe. No distinguimos si existe o no en el mensaje (por

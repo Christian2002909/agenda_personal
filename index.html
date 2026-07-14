@@ -47,6 +47,17 @@
       <button id="btn-logout" class="boton boton-secundario boton-chico">Cerrar sesión</button>
     </div>
 
+    <!-- Aviso global: el usuario logueado no tiene fila propia en `perfiles`
+         (típicamente el primer admin, creado a mano en el dashboard de
+         Supabase antes de que existiera "Crear Responsable"). Vive fuera de
+         las vistas para verse sin importar en qué pestaña se esté -- ver
+         js/auth.js (detección) y js/configuracion.js (pestaña Usuarios, que
+         es adonde lleva el botón). No bloquea el uso del resto de la app. -->
+    <div id="banner-sin-perfil" class="banner-aviso oculto">
+      <span>Todavía no tenés tu propio perfil cargado en el sistema (tus clientes no pueden identificarte como responsable).</span>
+      <button type="button" id="btn-ir-a-completar-perfil" class="boton boton-primario boton-chico">Completar mi perfil</button>
+    </div>
+
     <!-- Barra de navegación entre pantallas. data-vista indica qué sección
          de <main> debe mostrarse al hacer clic (ver js/navegacion.js). -->
     <nav class="nav-principal">
@@ -144,12 +155,12 @@
 
           <div class="fila-form">
             <label for="cliente-honorario-mensual">Cuota Mensual (Gs.)</label>
-            <input type="number" id="cliente-honorario-mensual" min="1" step="1" placeholder="Ej: 110000" />
+            <input type="text" inputmode="numeric" id="cliente-honorario-mensual" placeholder="Ej: 110.000" />
           </div>
 
           <div class="fila-form">
             <label for="cliente-honorario-anual">Cuota Anual (Gs.)</label>
-            <input type="number" id="cliente-honorario-anual" min="1" step="1" placeholder="Ej: 150000" />
+            <input type="text" inputmode="numeric" id="cliente-honorario-anual" placeholder="Ej: 150.000" />
           </div>
 
           <div class="acciones-form">
@@ -173,7 +184,7 @@
       <section class="tarjeta">
         <h2>Presentaciones Pendientes</h2>
         <div class="fila-form">
-          <label for="presentaciones-filtro-cartera">Ver cartera de</label>
+          <label for="presentaciones-filtro-cartera">Responsable:</label>
           <select id="presentaciones-filtro-cartera">
             <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
                  "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
@@ -209,7 +220,7 @@
             </select>
           </div>
           <div class="fila-form">
-            <label for="historial-filtro-cartera">Ver cartera de</label>
+            <label for="historial-filtro-cartera">Responsable:</label>
             <select id="historial-filtro-cartera">
               <!-- Las opciones se arman dinámicamente desde js/historial.js:
                    "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
@@ -231,14 +242,14 @@
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
 
-      <!-- Importar/exportar en Excel (.xlsx): dos importadores separados
-           (cuotas pactadas, historial de pagos) más un exportador con dos
-           hojas (Honorarios + Historial de Pagos) -- ver js/honorarios.js. -->
+      <!-- Importar/exportar en Excel (.xlsx): la cuota mensual/anual ahora
+           se importa junto con el Excel de Clientes (ver js/clientes.js) --
+           acá solo queda el importador del historial de pagos y el
+           exportador con dos hojas (Honorarios + Historial de Pagos), ver
+           js/honorarios.js. -->
       <section class="tarjeta">
         <h2>Importar / Exportar Honorarios (Excel)</h2>
-        <div class="acciones-form">
-          <button type="button" id="btn-importar-cuotas-excel" class="boton boton-secundario">Importar Cuotas desde Excel</button>
-          <input type="file" id="input-importar-cuotas-excel" accept=".xlsx" class="oculto" />
+        <div class="acciones-form grupo-botones-excel">
           <button type="button" id="btn-importar-pagos-excel" class="boton boton-secundario">Importar Historial de Pagos desde Excel</button>
           <input type="file" id="input-importar-pagos-excel" accept=".xlsx" class="oculto" />
           <button type="button" id="btn-exportar-honorarios-excel" class="boton boton-secundario">Exportar a Excel</button>
@@ -263,7 +274,7 @@
             <input type="search" id="honorarios-buscar" placeholder="Nombre o RUC..." />
           </div>
           <div class="fila-form">
-            <label for="honorarios-filtro-cartera">Ver cartera de</label>
+            <label for="honorarios-filtro-cartera">Responsable:</label>
             <select id="honorarios-filtro-cartera">
               <!-- Las opciones se arman dinámicamente desde js/honorarios.js:
                    "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
@@ -379,6 +390,7 @@
         <button type="button" class="config-tab-boton activo" data-config-tab="config-tab-tema">Tema</button>
         <button type="button" class="config-tab-boton" data-config-tab="config-tab-membrete">Membrete</button>
         <button type="button" class="config-tab-boton" data-config-tab="config-tab-paneles">Paneles</button>
+        <button type="button" class="config-tab-boton" data-config-tab="config-tab-usuarios">Usuarios</button>
       </div>
 
       <div id="config-tab-tema" class="config-tab-panel">
@@ -451,6 +463,67 @@
             </label>
             <small>La sección solo aparece desde febrero, además de requerir este switch activado (ver js/honorarios.js).</small>
           </div>
+        </section>
+      </div>
+
+      <div id="config-tab-usuarios" class="config-tab-panel oculto">
+        <!-- Autoregistro del propio usuario logueado: distinto de "Crear
+             Responsable" de abajo -- acá NO se crea ninguna cuenta de Auth
+             nueva (la cuenta ya existe, es la sesión actual), solo falta la
+             fila de `perfiles` con id = auth.uid() propio. Se muestra/oculta
+             desde js/configuracion.js según si ya existe esa fila (ver
+             cargarConfiguracion()). -->
+        <section class="tarjeta oculto" id="tarjeta-mi-perfil">
+          <h2>Tu perfil</h2>
+          <p>
+            Todavía no tenés tu propio perfil cargado -- completá tu nombre para que tus
+            clientes puedan identificarte como responsable. Esto no crea una cuenta nueva: la
+            tuya ya existe, es la sesión con la que estás logueado ahora mismo.
+          </p>
+          <div id="configuracion-mi-perfil-mensaje" class="mensaje oculto"></div>
+          <form id="form-mi-perfil">
+            <div class="fila-form">
+              <label for="mi-perfil-nombre">Tu nombre</label>
+              <input type="text" id="mi-perfil-nombre" placeholder="Ej: Nombre del responsable" spellcheck="true" required />
+            </div>
+            <div class="acciones-form">
+              <button type="submit" class="boton boton-primario">Crear mi perfil</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="tarjeta">
+          <h2>Crear Responsable</h2>
+          <p>
+            Crea una cuenta de acceso REAL a la app (la persona se loguea después con su propio
+            email y contraseña) y su perfil. No hay restricción entre usuarios: cualquiera puede
+            seguir viendo y editando la cartera de cualquier otro.
+          </p>
+          <div id="configuracion-usuarios-mensaje" class="mensaje oculto"></div>
+          <form id="form-crear-responsable">
+            <div class="fila-form">
+              <label for="responsable-nombre">Nombre</label>
+              <input type="text" id="responsable-nombre" placeholder="Ej: Nombre del responsable" spellcheck="true" required />
+            </div>
+            <div class="fila-form">
+              <label for="responsable-email">Email</label>
+              <input type="email" id="responsable-email" autocomplete="off" required />
+            </div>
+            <div class="fila-form">
+              <label for="responsable-password">Contraseña inicial</label>
+              <input type="text" id="responsable-password" autocomplete="off" spellcheck="false" minlength="6" required />
+              <button type="button" id="btn-generar-password" class="boton boton-secundario">Generar contraseña</button>
+              <small>
+                Se muestra en texto plano a propósito: después de crear la cuenta hay que
+                comunicarle este email y esta contraseña a la persona, ya que no hay garantía de
+                que le llegue un mail de confirmación. Mínimo 6 caracteres.
+              </small>
+            </div>
+            <div class="acciones-form">
+              <button type="submit" class="boton boton-primario">Crear responsable</button>
+            </div>
+          </form>
+          <div id="responsable-creado-resultado" class="resumen-importacion oculto"></div>
         </section>
       </div>
 

@@ -659,6 +659,85 @@ create index if not exists idx_pagos_honorarios_cliente_fecha
     on public.pagos_honorarios (cliente_id, fecha_pago desc);
 
 -- ---------------------------------------------------------------------
+-- 11.1 TABLA deudas_congeladas_honorarios
+-- ---------------------------------------------------------------------
+-- Deuda vieja de un cliente que se "congela" (difiere el cobro) sin
+-- perdonarla: ejemplo real que motivó esta tabla, un cliente debe
+-- Gs. 500.000 acumulados de los meses 1 a 5 de la cuota mensual, pero
+-- desde el mes 6 vuelve a pagar puntual la cuota corriente. Se congela
+-- ese monto viejo con una fecha en la que se espera cobrarlo (en el
+-- ejemplo, diciembre) para que el cálculo de "Debe" corriente
+-- (calcularSaldoPorTipo/contarPeriodosAdeudables en js/honorarios.js) deje
+-- de contarlo -- deja de mostrar "Debe" mientras el cliente esté al día
+-- con lo corriente desde que se congeló en adelante -- pero el monto
+-- congelado NO se pierde: queda registrado acá, aparte, hasta que se
+-- marca `pagada` cuando finalmente se cobra. No es lo mismo que condonar
+-- (perdonar sin cobrar nunca): es diferir/pausar el cobro de una deuda
+-- que se sigue debiendo.
+--
+-- A propósito NO hay una columna `fecha_registro` separada de
+-- `created_at`: a diferencia de honorarios.created_at (que es la fecha de
+-- configuración del honorario y puede tener otros usos), acá `created_at`
+-- solo significa una cosa -- el momento en que se congeló esta deuda -- y
+-- es exactamente el punto de partida nuevo que usa el cálculo corriente
+-- (ver contarPeriodosAdeudables en js/honorarios.js), así que reusarlo
+-- evita una columna redundante.
+create table if not exists public.deudas_congeladas_honorarios (
+    id             bigint generated always as identity primary key,
+
+    cliente_id     bigint not null
+                       references public.clientes(id) on delete cascade,
+
+    -- A cuál de las dos cuotas corresponde (mismo check que
+    -- pagos_honorarios.tipo_honorario).
+    tipo_honorario text not null,
+
+    -- Monto congelado (el total que se debía en el momento de congelar).
+    monto          numeric(14, 0) not null,
+
+    -- Fecha en la que se espera cobrar la deuda congelada (ej. diciembre
+    -- del ejemplo del usuario). Solo informativa/de referencia, no dispara
+    -- nada automático.
+    fecha_acuerdo  date not null,
+
+    -- Se completa recién cuando finalmente se cobra (ver constraint
+    -- deudas_congeladas_pagada_consistente). Marcarla "pagada" NO inserta
+    -- un pago en pagos_honorarios -- este monto no corresponde a un
+    -- período puntual (es la suma de varios meses/años viejos), así que
+    -- mezclarlo en pagos_honorarios ensuciaría la reconciliación
+    -- período-por-período que hace la ficha de pago imprimible
+    -- (construirTablaMensualFicha busca el pago de CADA mes por
+    -- separado). Queda resuelta acá mismo, aparte.
+    pagada         boolean not null default false,
+    fecha_pago     date,
+
+    created_at     timestamptz not null default now(),
+    updated_at     timestamptz not null default now(),
+
+    constraint deudas_congeladas_tipo_valido
+        check (tipo_honorario in ('mensual', 'anual')),
+
+    constraint deudas_congeladas_monto_positivo
+        check (monto > 0),
+
+    constraint deudas_congeladas_pagada_consistente
+        check (
+            (pagada = false and fecha_pago is null)
+            or
+            (pagada = true and fecha_pago is not null)
+        )
+);
+
+comment on table public.deudas_congeladas_honorarios is
+    'Deuda vieja de un cliente+tipo_honorario que se congela (difiere el cobro sin condonarla): mientras tenga una fila con pagada = false, js/honorarios.js usa el created_at de la fila mas reciente como nuevo punto de partida del calculo de "Debe" corriente en vez de honorarios.created_at, y la muestra aparte con un badge distinto ("Deuda congelada"). Se marca pagada (con fecha_pago) cuando finalmente se cobra -- no genera una fila en pagos_honorarios, ver comentario de la columna pagada.';
+
+-- Acelera "¿este cliente+tipo tiene una deuda congelada pendiente?", que
+-- se consulta para cada fila de la tabla de Honorarios.
+create index if not exists idx_deudas_congeladas_pendientes
+    on public.deudas_congeladas_honorarios (cliente_id, tipo_honorario)
+    where pagada = false;
+
+-- ---------------------------------------------------------------------
 -- 12. TRIGGERS updated_at — reusan public.set_updated_at(), ya creada en
 --     la sección 3 para `clientes` (no se redefine la función).
 -- ---------------------------------------------------------------------
@@ -695,6 +774,12 @@ create trigger trg_honorarios_set_updated_at
 drop trigger if exists trg_pagos_honorarios_set_updated_at on public.pagos_honorarios;
 create trigger trg_pagos_honorarios_set_updated_at
     before update on public.pagos_honorarios
+    for each row
+    execute function public.set_updated_at();
+
+drop trigger if exists trg_deudas_congeladas_honorarios_set_updated_at on public.deudas_congeladas_honorarios;
+create trigger trg_deudas_congeladas_honorarios_set_updated_at
+    before update on public.deudas_congeladas_honorarios
     for each row
     execute function public.set_updated_at();
 
@@ -803,6 +888,21 @@ create policy "pagos_honorarios_acceso_autenticados"
 revoke select, insert, update, delete on public.pagos_honorarios from anon;
 grant select, insert, update, delete on public.pagos_honorarios to authenticated;
 
+-- deudas_congeladas_honorarios
+alter table public.deudas_congeladas_honorarios enable row level security;
+
+drop policy if exists "deudas_congeladas_honorarios_acceso_autenticados" on public.deudas_congeladas_honorarios;
+
+create policy "deudas_congeladas_honorarios_acceso_autenticados"
+    on public.deudas_congeladas_honorarios
+    for all
+    to authenticated
+    using (true)
+    with check (true);
+
+revoke select, insert, update, delete on public.deudas_congeladas_honorarios from anon;
+grant select, insert, update, delete on public.deudas_congeladas_honorarios to authenticated;
+
 -- ---------------------------------------------------------------------
 -- 14. ENDURECIMIENTO POR ROL (futuro, opcional) — mismo criterio que la
 --     sección 5 (clientes). Si en el futuro se necesita editar el catálogo
@@ -856,6 +956,23 @@ create policy "perfiles_lectura_autenticados"
     using (true);
 
 grant select on public.perfiles to authenticated;
+
+-- Falta policy de INSERT: Configuración > "Crear responsable" da de alta un
+-- perfil para OTRO usuario recién creado (id = auth.users.id del usuario
+-- nuevo, no el propio de quien está logueado haciendo el alta), así que
+-- "with check (id = auth.uid())" no serviría -- se necesita el mismo
+-- criterio "sin restricción entre usuarios autenticados" que ya rige el
+-- resto de la app (ver sección "Cartera por responsable": cualquiera puede
+-- ver/editar la cartera de cualquier otro, no hay rol admin todavía).
+drop policy if exists "perfiles_insertar_autenticados" on public.perfiles;
+
+create policy "perfiles_insertar_autenticados"
+    on public.perfiles
+    for insert
+    to authenticated
+    with check (true);
+
+grant insert on public.perfiles to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 15.1 BACKFILL de clientes.responsable_id (columna agregada en la

@@ -35,6 +35,19 @@ const elPanelRg90Visible = document.getElementById('panel-rg90-visible');
 const elPanelHonorariosCuotaAnual = document.getElementById('panel-honorarios-cuota-anual');
 const elConfiguracionPanelesMensaje = document.getElementById('configuracion-paneles-mensaje');
 
+const elTarjetaMiPerfil = document.getElementById('tarjeta-mi-perfil');
+const elFormMiPerfil = document.getElementById('form-mi-perfil');
+const elMiPerfilNombre = document.getElementById('mi-perfil-nombre');
+const elConfiguracionMiPerfilMensaje = document.getElementById('configuracion-mi-perfil-mensaje');
+
+const elFormCrearResponsable = document.getElementById('form-crear-responsable');
+const elResponsableNombre = document.getElementById('responsable-nombre');
+const elResponsableEmail = document.getElementById('responsable-email');
+const elResponsablePassword = document.getElementById('responsable-password');
+const elBtnGenerarPassword = document.getElementById('btn-generar-password');
+const elConfiguracionUsuariosMensaje = document.getElementById('configuracion-usuarios-mensaje');
+const elResponsableCreadoResultado = document.getElementById('responsable-creado-resultado');
+
 // Logo elegido en esta sesión de edición (base64), o el que ya estaba
 // guardado si el usuario no tocó el input de archivo. null = sin logo.
 let logoBase64Actual = null;
@@ -44,17 +57,22 @@ let logoBase64Actual = null;
 const elConfigTabBotones = document.querySelectorAll('.config-tab-boton');
 const elConfigTabPaneles = document.querySelectorAll('.config-tab-panel');
 
-for (const boton of elConfigTabBotones) {
-  boton.addEventListener('click', () => {
-    const idTab = boton.dataset.configTab;
+// Extraído a función aparte (antes vivía inline en el listener de cada
+// botón) para poder reusarlo desde window.mostrarPestanaUsuariosConfiguracion
+// más abajo, que auth.js dispara cuando el usuario hace clic en "Completar
+// mi perfil" del banner global -- mismo criterio de comunicación entre
+// pantallas que el resto de la app (ver CLAUDE.md).
+function activarPestanaConfiguracion(idTab) {
+  for (const panel of elConfigTabPaneles) {
+    panel.classList.toggle('oculto', panel.id !== idTab);
+  }
+  for (const boton of elConfigTabBotones) {
+    boton.classList.toggle('activo', boton.dataset.configTab === idTab);
+  }
+}
 
-    for (const panel of elConfigTabPaneles) {
-      panel.classList.toggle('oculto', panel.id !== idTab);
-    }
-    for (const otroBoton of elConfigTabBotones) {
-      otroBoton.classList.toggle('activo', otroBoton === boton);
-    }
-  });
+for (const boton of elConfigTabBotones) {
+  boton.addEventListener('click', () => activarPestanaConfiguracion(boton.dataset.configTab));
 }
 
 function aplicarTema(tema) {
@@ -83,6 +101,48 @@ function mostrarMensajePaneles(texto, tipo = 'exito') {
   elConfiguracionPanelesMensaje.className = `mensaje mensaje-${tipo}`;
   elConfiguracionPanelesMensaje.classList.remove('oculto');
   setTimeout(() => elConfiguracionPanelesMensaje.classList.add('oculto'), 4000);
+}
+
+function mostrarMensajeMiPerfil(texto, tipo = 'exito') {
+  if (!elConfiguracionMiPerfilMensaje) return;
+  elConfiguracionMiPerfilMensaje.textContent = texto;
+  elConfiguracionMiPerfilMensaje.className = `mensaje mensaje-${tipo}`;
+  elConfiguracionMiPerfilMensaje.classList.remove('oculto');
+  setTimeout(() => elConfiguracionMiPerfilMensaje.classList.add('oculto'), 4000);
+}
+
+// No usa setTimeout para auto-ocultarse (a diferencia de los otros
+// mensajes de esta pantalla) porque el resultado de crear un responsable
+// (con el email/contraseña que hay que comunicarle) se muestra debajo y
+// tiene que poder quedar visible el tiempo que el admin necesite para
+// copiarlo, no desaparecer solo.
+function mostrarMensajeUsuarios(texto, tipo = 'exito') {
+  if (!elConfiguracionUsuariosMensaje) return;
+  elConfiguracionUsuariosMensaje.textContent = texto;
+  elConfiguracionUsuariosMensaje.className = `mensaje mensaje-${tipo}`;
+  elConfiguracionUsuariosMensaje.classList.remove('oculto');
+}
+
+// Mismo patrón que escaparHtml() en clientes.js/presentaciones.js: cada
+// archivo tiene su propia copia porque son scripts sueltos sin módulos
+// (ver cabecera de este archivo y CLAUDE.md). Evita que un nombre/email
+// con caracteres especiales rompa el innerHTML del resultado de abajo.
+function escaparHtmlConfiguracion(texto) {
+  const div = document.createElement('div');
+  div.textContent = texto ?? '';
+  return div.innerHTML;
+}
+
+// Sugiere una contraseña de 12 caracteres (mayúsculas/minúsculas/números/
+// símbolo, sin caracteres fácilmente confundibles como 0/O o 1/l/I) --
+// sigue siendo editable a mano antes de crear la cuenta.
+function generarPasswordAleatoria() {
+  const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let resultado = '';
+  for (let i = 0; i < 12; i++) {
+    resultado += ALFABETO[Math.floor(Math.random() * ALFABETO.length)];
+  }
+  return resultado;
 }
 
 function mostrarPreviewLogo(base64) {
@@ -129,6 +189,40 @@ async function cargarConfiguracion() {
   } catch (error) {
     console.error('Error al cargar el membrete general:', error);
     mostrarMensajeConfiguracionEstudio('No se pudo cargar el membrete general.', 'error');
+  }
+
+  await verificarPerfilPropioConfiguracion();
+}
+
+// Se llama cada vez que se entra a la pestaña Configuración (igual que el
+// resto de cargarConfiguracion()): muestra la tarjeta "Tu perfil" solo si
+// el usuario logueado todavía no tiene su propia fila en `perfiles` (ver
+// docs/PEDIDOS_PENDIENTES.md, "Pantalla Configuración / Clientes"). No
+// bloquea el resto de la pestaña si esta consulta puntual falla.
+async function verificarPerfilPropioConfiguracion() {
+  if (!elTarjetaMiPerfil || !supabaseConfiguracion) return;
+
+  try {
+    const { data: sesionData, error: errorSesion } = await supabaseConfiguracion.auth.getSession();
+    if (errorSesion) throw errorSesion;
+
+    const usuarioId = sesionData?.session?.user?.id;
+    if (!usuarioId) {
+      elTarjetaMiPerfil.classList.add('oculto');
+      return;
+    }
+
+    const { data: perfilPropio, error: errorPerfilPropio } = await supabaseConfiguracion
+      .from('perfiles')
+      .select('id')
+      .eq('id', usuarioId)
+      .maybeSingle();
+
+    if (errorPerfilPropio) throw errorPerfilPropio;
+
+    elTarjetaMiPerfil.classList.toggle('oculto', Boolean(perfilPropio));
+  } catch (error) {
+    console.error('Error al verificar si el usuario logueado tiene su propio perfil:', error);
   }
 }
 
@@ -232,9 +326,212 @@ for (const [columna, elemento] of SWITCHES_PANELES) {
   });
 }
 
+// --- Tu perfil: autoregistro del propio usuario logueado ------------------
+// Distinto de "Crear Responsable" de abajo: acá NO se crea ninguna cuenta
+// de Auth nueva -- la cuenta ya existe (es la sesión actual), solo falta
+// insertar la fila de `perfiles` con id = auth.uid() propio. La policy
+// "perfiles_insertar_autenticados" (with check (true), agregada en la
+// tanda de "Crear Responsable") ya permite este insert sin cambios: la
+// condición no depende del id insertado, así que también cubre el caso
+// "insertar mi propia fila" -- no hizo falta tocar schema.sql.
+
+if (elFormMiPerfil) {
+  elFormMiPerfil.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+
+    if (!supabaseConfiguracion) {
+      mostrarMensajeMiPerfil('Falta configurar la conexión a Supabase.', 'error');
+      return;
+    }
+
+    const nombre = elMiPerfilNombre.value.trim();
+    if (!nombre) {
+      mostrarMensajeMiPerfil('Escribí tu nombre.', 'error');
+      return;
+    }
+
+    const boton = elFormMiPerfil.querySelector('button[type="submit"]');
+    boton.disabled = true;
+
+    try {
+      const { data: sesionData, error: errorSesion } = await supabaseConfiguracion.auth.getSession();
+      const usuarioId = sesionData?.session?.user?.id;
+      if (errorSesion || !usuarioId) {
+        throw new Error('No se pudo leer tu sesión actual.');
+      }
+
+      const { error: errorPerfil } = await supabaseConfiguracion
+        .from('perfiles')
+        .insert({ id: usuarioId, nombre, rol: 'responsable' });
+
+      if (errorPerfil) throw errorPerfil;
+
+      mostrarMensajeMiPerfil('Perfil creado correctamente.');
+      elFormMiPerfil.reset();
+      elTarjetaMiPerfil.classList.add('oculto');
+
+      // El banner de aviso de la barra superior vive fuera de esta pantalla
+      // (index.html) y lo maneja js/auth.js -- lo refrescamos para que
+      // desaparezca de inmediato en vez de esperar a un próximo login.
+      if (typeof window.verificarPerfilPropio === 'function') {
+        window.verificarPerfilPropio();
+      }
+
+      // No hace falta refrescar a mano ningún <select> de "Responsable"/
+      // "Ver cartera de" en Clientes/Presentaciones/Historial/Honorarios:
+      // cada una de esas pantallas vuelve a leer `perfiles` al entrar a su
+      // pestaña (ver navegacion.js, FUNCION_DE_RECARGA_POR_VISTA), así que
+      // el nombre recién creado aparece solo con cambiar de pestaña -- mismo
+      // comportamiento ya documentado para "Crear Responsable" más abajo.
+    } catch (error) {
+      console.error('Error al crear tu perfil propio:', error);
+      const mensajeCrudo = error?.message || '';
+      let mensaje = 'No se pudo crear tu perfil. Intentá de nuevo.';
+      if (/duplicate key|already exists/i.test(mensajeCrudo)) {
+        mensaje = 'Ya tenés un perfil creado -- recargá la pestaña.';
+      }
+      mostrarMensajeMiPerfil(mensaje, 'error');
+    } finally {
+      boton.disabled = false;
+    }
+  });
+}
+
+// --- Usuarios: crear un responsable nuevo con acceso real a la app --------
+
+if (elBtnGenerarPassword) {
+  elBtnGenerarPassword.addEventListener('click', () => {
+    elResponsablePassword.value = generarPasswordAleatoria();
+  });
+}
+
+if (elFormCrearResponsable) {
+  elFormCrearResponsable.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+
+    if (!supabaseConfiguracion) {
+      mostrarMensajeUsuarios('Falta configurar la conexión a Supabase.', 'error');
+      return;
+    }
+
+    const nombre = elResponsableNombre.value.trim();
+    const email = elResponsableEmail.value.trim();
+    const password = elResponsablePassword.value;
+
+    if (!nombre || !email || !password) {
+      mostrarMensajeUsuarios('Completá nombre, email y contraseña.', 'error');
+      return;
+    }
+
+    const boton = elFormCrearResponsable.querySelector('button[type="submit"]');
+    boton.disabled = true;
+    elResponsableCreadoResultado.classList.add('oculto');
+    elConfiguracionUsuariosMensaje.classList.add('oculto');
+
+    try {
+      // 1) Guardamos la sesión del admin ANTES de crear el usuario nuevo.
+      // signUp() puede dejar al cliente logueado como el usuario NUEVO en
+      // vez de mantener la sesión de quien lo está creando -- sin este
+      // paso, dar de alta un responsable desloguearía al admin de su
+      // propia cuenta (ver docs/PEDIDOS_PENDIENTES.md, "Crear responsables
+      // (usuarios) desde Configuración").
+      const { data: sesionActual, error: errorSesion } = await supabaseConfiguracion.auth.getSession();
+      if (errorSesion || !sesionActual?.session) {
+        throw new Error('No se pudo leer tu sesión actual. Por seguridad, no se crea el responsable.');
+      }
+      const tokensAdmin = {
+        access_token: sesionActual.session.access_token,
+        refresh_token: sesionActual.session.refresh_token,
+      };
+
+      // 2) Creamos la cuenta nueva de Supabase Auth.
+      const { data: datosAlta, error: errorAlta } = await supabaseConfiguracion.auth.signUp({ email, password });
+      if (errorAlta) throw errorAlta;
+
+      const usuarioNuevoId = datosAlta?.user?.id;
+      if (!usuarioNuevoId) {
+        throw new Error('Supabase no devolvió el id del usuario nuevo.');
+      }
+
+      // signUp() devuelve session=null cuando el proyecto tiene ACTIVADA la
+      // confirmación de email (el usuario nuevo no puede loguearse hasta
+      // confirmar el correo); devuelve una sesión activa cuando esa
+      // confirmación está DESACTIVADA. Es la única forma de detectar esto
+      // desde el cliente -- el ajuste en sí vive en el dashboard de
+      // Supabase (Authentication → Providers → Email → "Confirm email"),
+      // fuera del alcance del código.
+      const requiereConfirmacionEmail = !datosAlta.session;
+
+      // 3) Restauramos la sesión del admin INMEDIATAMENTE, sin depender de
+      // si el paso anterior nos dejó logueados como el usuario nuevo o no.
+      const { error: errorRestaurar } = await supabaseConfiguracion.auth.setSession(tokensAdmin);
+      if (errorRestaurar) {
+        console.error('Error al restaurar la sesión del admin:', errorRestaurar);
+        mostrarMensajeUsuarios(
+          'La cuenta se creó, pero no se pudo restaurar tu sesión automáticamente. Si quedaste desconectado, volvé a loguearte -- el perfil de este responsable todavía no se guardó, hay que completarlo a mano en Supabase o reintentar.',
+          'error'
+        );
+        return;
+      }
+
+      // 4) Insertamos el perfil (nombre visible + rol por defecto). Recién
+      // acá existe la fila que el resto de la app usa para listar
+      // responsables (ver policy "perfiles_insertar_autenticados" en
+      // schema.sql).
+      const { error: errorPerfil } = await supabaseConfiguracion
+        .from('perfiles')
+        .insert({ id: usuarioNuevoId, nombre, rol: 'responsable' });
+
+      if (errorPerfil) throw errorPerfil;
+
+      // 5) Mostramos el resultado: el admin necesita ver el email y la
+      // contraseña para poder comunicárselos a la persona, ya que no hay
+      // garantía de que le llegue el mail (y si la confirmación por email
+      // está activada, ni siquiera puede ingresar todavía).
+      elResponsableCreadoResultado.innerHTML = `
+        <p><strong>Responsable creado correctamente.</strong></p>
+        <p>Email: <strong>${escaparHtmlConfiguracion(email)}</strong></p>
+        <p>Contraseña inicial: <strong>${escaparHtmlConfiguracion(password)}</strong></p>
+        <p>${
+          requiereConfirmacionEmail
+            ? `Este proyecto de Supabase tiene la confirmación por email ACTIVADA: ${escaparHtmlConfiguracion(nombre)} tiene que revisar su correo (${escaparHtmlConfiguracion(email)}) y confirmar la cuenta antes de poder ingresar.`
+            : `La confirmación por email está DESACTIVADA en este proyecto: ${escaparHtmlConfiguracion(nombre)} ya puede ingresar ahora mismo con este email y esta contraseña.`
+        }</p>
+      `;
+      elResponsableCreadoResultado.classList.remove('oculto');
+
+      mostrarMensajeUsuarios('Responsable creado correctamente.');
+      elFormCrearResponsable.reset();
+
+      // No hace falta refrescar ningún <select> de "Ver cartera de"/
+      // "Responsable" a mano acá: cada pantalla (Clientes, Presentaciones,
+      // Historial, Honorarios) vuelve a leer `perfiles` cada vez que se
+      // entra a esa pestaña (ver navegacion.js, FUNCION_DE_RECARGA_POR_VISTA),
+      // así que el responsable nuevo aparece solo con cambiar de pestaña.
+    } catch (error) {
+      console.error('Error al crear el responsable:', error);
+      const mensajeCrudo = error?.message || '';
+      let mensaje = 'No se pudo crear el responsable. Revisá los datos e intentá de nuevo.';
+      if (/already registered|already exists|user_already_exists/i.test(mensajeCrudo)) {
+        mensaje = 'Ya existe una cuenta con ese email.';
+      } else if (/password/i.test(mensajeCrudo)) {
+        mensaje = 'La contraseña no cumple los requisitos mínimos de Supabase (probá con una más larga).';
+      }
+      mostrarMensajeUsuarios(mensaje, 'error');
+    } finally {
+      boton.disabled = false;
+    }
+  });
+}
+
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.
 window.cargarConfiguracion = cargarConfiguracion;
+
+// Expuesta para que js/auth.js pueda llevar al usuario directo a la
+// pestaña Usuarios (donde vive la tarjeta "Tu perfil") al hacer clic en
+// "Completar mi perfil" del banner global.
+window.mostrarPestanaUsuariosConfiguracion = () => activarPestanaConfiguracion('config-tab-usuarios');
 
 // Aplicamos el tema guardado apenas carga este script (antes de mostrar
 // nada), para no arrancar siempre en claro y "saltar" a oscuro después.
