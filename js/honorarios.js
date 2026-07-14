@@ -1330,16 +1330,49 @@ function construirListaOtrosGastosPendientesHtml(clienteId) {
     <ul class="lista-resumen-importacion">
       ${pendientes
         .map((gasto) => `
-          <li data-fila-gasto-id="${gasto.id}">
+          <li data-fila-gasto-id="${gasto.id}" class="fila-gasto-pendiente">
             <label class="celda-checkbox-inline">
               <input type="checkbox" data-marcar-gasto-pagado-id="${gasto.id}" />
               ${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}
               -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}
             </label>
+            <span class="fila-gasto-pendiente-acciones">
+              <button type="button" class="boton-link" data-editar-gasto-id="${gasto.id}">Editar</button>
+              <button type="button" class="boton-link" data-eliminar-gasto-id="${gasto.id}">Eliminar</button>
+            </span>
           </li>
         `)
         .join('')}
     </ul>`;
+}
+
+// Mini-formulario que reemplaza, en el lugar, el <li> de un gasto pendiente
+// cuando se hace clic en "Editar" -- mismos campos que "Cargar gasto
+// nuevo" pero precargados, y guarda con UPDATE en vez de INSERT (ver
+// guardarGastoEditadoInline).
+function construirSubformularioEditarGastoHtml(gasto) {
+  return `
+    <form class="form-editar-gasto-inline" data-gasto-id="${gasto.id}">
+      <div class="grilla-form-inline">
+        <div class="fila-form">
+          <label>Descripción</label>
+          <input type="text" class="campo-gasto-descripcion" required spellcheck="true" value="${escaparHtmlHonorarios(gasto.descripcion)}" />
+        </div>
+        <div class="fila-form">
+          <label>Monto (Gs.)</label>
+          <input type="text" inputmode="numeric" class="campo-gasto-monto" required value="${formatearConPuntos(String(gasto.monto))}" />
+        </div>
+        <div class="fila-form">
+          <label>Fecha del Cargo</label>
+          <input type="date" class="campo-gasto-fecha-cargo" value="${gasto.fecha_cargo}" />
+        </div>
+      </div>
+      <div class="acciones-form">
+        <button type="submit" class="boton boton-primario boton-chico">Guardar Cambios</button>
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-editar-gasto="${gasto.cliente_id}">Cancelar</button>
+      </div>
+    </form>
+  `;
 }
 
 // Mini-formulario que reemplaza, en el lugar, el <li> de un gasto pendiente
@@ -1440,6 +1473,55 @@ async function guardarGastoNuevoInline(form) {
   } catch (error) {
     console.error('Error al cargar el gasto:', error);
     mostrarMensajeHonorarios('No se pudo cargar el gasto.', 'error');
+  }
+}
+
+// Corrige un gasto ya cargado (descripción/monto/fecha) -- para cuando se
+// tipeó mal el monto o la descripción, sin necesidad de eliminarlo y
+// cargarlo de nuevo.
+async function guardarGastoEditadoInline(form) {
+  const gastoId = Number(form.dataset.gastoId);
+  const descripcion = form.querySelector('.campo-gasto-descripcion').value.trim();
+  const monto = Number(quitarPuntos(form.querySelector('.campo-gasto-monto').value));
+  const fechaCargo = form.querySelector('.campo-gasto-fecha-cargo').value || formatearFechaISO(new Date());
+
+  if (!descripcion) {
+    mostrarMensajeHonorarios('Cargá una descripción para el gasto.', 'error');
+    return;
+  }
+  if (!monto || monto <= 0) {
+    mostrarMensajeHonorarios('Cargá un monto válido.', 'error');
+    return;
+  }
+
+  try {
+    const { error } = await supabaseHonorarios
+      .from('otros_gastos_honorarios')
+      .update({ descripcion, monto, fecha_cargo: fechaCargo })
+      .eq('id', gastoId);
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto actualizado correctamente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al actualizar el gasto:', error);
+    mostrarMensajeHonorarios('No se pudo actualizar el gasto.', 'error');
+  }
+}
+
+// Elimina un gasto cargado por error (nunca se llegó a pagar ni corresponde
+// -- si ya se pagó, no debería estar en la lista de pendientes que muestra
+// este botón).
+async function eliminarGastoInline(gastoId) {
+  try {
+    const { error } = await supabaseHonorarios.from('otros_gastos_honorarios').delete().eq('id', gastoId);
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto eliminado correctamente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al eliminar el gasto:', error);
+    mostrarMensajeHonorarios('No se pudo eliminar el gasto.', 'error');
   }
 }
 
@@ -1675,6 +1757,33 @@ elGruposHonorarios.addEventListener('click', (evento) => {
     return;
   }
 
+  // "Editar" de un otro gasto pendiente: reemplaza, en el lugar, el <li>
+  // por el mini-formulario precargado (ver construirSubformularioEditarGastoHtml).
+  const botonEditarGasto = evento.target.closest('button[data-editar-gasto-id]');
+  if (botonEditarGasto) {
+    const gastoId = Number(botonEditarGasto.dataset.editarGastoId);
+    const gasto = otrosGastosCache.find((g) => g.id === gastoId);
+    const filaGasto = evento.target.closest('li[data-fila-gasto-id]');
+    if (gasto && filaGasto) filaGasto.innerHTML = construirSubformularioEditarGastoHtml(gasto);
+    return;
+  }
+
+  // Cancelar la edición de un gasto: vuelve a pintar el panel completo de
+  // Otros Gastos (más simple que reconstruir un solo <li> desde acá).
+  const botonCancelarEditarGasto = evento.target.closest('[data-cancelar-editar-gasto]');
+  if (botonCancelarEditarGasto) {
+    abrirFormularioOtrosGastos(Number(botonCancelarEditarGasto.dataset.cancelarEditarGasto));
+    return;
+  }
+
+  // Eliminar un otro gasto cargado por error -- acción directa, sin
+  // formulario de por medio (mismo criterio que "Eliminar pago").
+  const botonEliminarGasto = evento.target.closest('button[data-eliminar-gasto-id]');
+  if (botonEliminarGasto) {
+    eliminarGastoInline(Number(botonEliminarGasto.dataset.eliminarGastoId));
+    return;
+  }
+
   // "Eliminar pago" dentro del formulario de un pago existente -- para
   // cuando lo que corresponde no es corregirlo (Guardar) sino borrarlo del
   // todo, ej. se tildó un mes por error. Nunca se llega acá tildando un
@@ -1721,6 +1830,13 @@ elGruposHonorarios.addEventListener('submit', async (evento) => {
   if (formNuevoGasto) {
     evento.preventDefault();
     await guardarGastoNuevoInline(formNuevoGasto);
+    return;
+  }
+
+  const formEditarGasto = evento.target.closest('form.form-editar-gasto-inline');
+  if (formEditarGasto) {
+    evento.preventDefault();
+    await guardarGastoEditadoInline(formEditarGasto);
     return;
   }
 

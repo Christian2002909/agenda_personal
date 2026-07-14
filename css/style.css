@@ -356,6 +356,21 @@ table.tabla-honorarios-grilla th {
   flex-shrink: 0;
 }
 
+/* Fila de un "otro gasto" pendiente (panel Otros Gastos): el checkbox de
+   "pagado" a la izquierda, Editar/Eliminar a la derecha. */
+.fila-gasto-pendiente {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fila-gasto-pendiente-acciones {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .fila-form-botones {
   display: flex;
   align-items: flex-end;
