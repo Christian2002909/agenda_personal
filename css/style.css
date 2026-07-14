@@ -20,6 +20,14 @@
   --color-marca-hover: #16304d;
   --color-marca-texto: #cbd5e1;
 
+  /* Color de los links de texto (.boton-link, ej. el nombre del cliente
+     en las tablas) -- variable APARTE de --color-marca a propósito: esa se
+     usa también como fondo de botones/navbar, y en modo oscuro es un azul
+     muy oscuro que, usado como color de TEXTO sobre una superficie
+     también oscura, quedaba casi invisible. Acá sí varía fuerte entre
+     temas (oscuro sobre fondo claro, claro sobre fondo oscuro). */
+  --color-enlace: #1e3a5f;
+
   --color-secundario-fondo: #e5e7eb;
   --color-secundario-texto: #1f2937;
 
@@ -50,6 +58,7 @@
   --color-marca: #14283f;
   --color-marca-hover: #0e1d2e;
   --color-marca-texto: #94a3b8;
+  --color-enlace: #93c5fd;
 
   --color-secundario-fondo: #334155;
   --color-secundario-texto: #e2e8f0;
@@ -116,13 +125,13 @@ body {
 }
 
 .nav-boton:hover {
-  color: var(--color-marca);
+  color: var(--color-enlace);
 }
 
 .nav-boton.activo {
-  color: var(--color-marca);
+  color: var(--color-enlace);
   font-weight: 600;
-  border-bottom-color: var(--color-marca);
+  border-bottom-color: var(--color-enlace);
 }
 
 .config-tabs {
@@ -143,13 +152,13 @@ body {
 }
 
 .config-tab-boton:hover {
-  color: var(--color-marca);
+  color: var(--color-enlace);
 }
 
 .config-tab-boton.activo {
-  color: var(--color-marca);
+  color: var(--color-enlace);
   font-weight: 600;
-  border-bottom-color: var(--color-marca);
+  border-bottom-color: var(--color-enlace);
 }
 
 .logo-preview {
@@ -256,7 +265,7 @@ input[type='search'] {
   background: none;
   padding: 0;
   font-size: inherit;
-  color: var(--color-marca);
+  color: var(--color-enlace);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -554,11 +563,20 @@ input[type='search'] {
    (Editar cuota/Detalle/Deuda congelada/Otros Gastos) se agrupan en un
    único <select> "Acciones ▾" que vuelve solo al placeholder después de
    cada elección (ver el listener de "change" en js/honorarios.js). */
+/* "Ficha" y el desplegable "Acciones" apilados en columna, con el mismo
+   ancho fijo -- antes cada uno tomaba el ancho de su propio contenido
+   ("Ficha" angosto, "Acciones ▾" más ancho) y quedaban desparejos. */
 .celda-acciones-honorarios {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
-  flex-wrap: wrap;
+  width: 150px;
+}
+
+.celda-acciones-honorarios .boton-chico {
+  padding: 5px 8px;
+  text-align: center;
 }
 
 .selector-acciones-honorarios {
@@ -649,7 +667,7 @@ input[type='search'] {
 }
 
 .login-nombre-boton:hover {
-  border-color: var(--color-marca);
+  border-color: var(--color-enlace);
   background-color: var(--color-chico-fondo);
 }
 
@@ -754,9 +772,32 @@ input[type='search'] {
    Honorarios para registrar/editar un pago, editar la cuota pactada, o ver
    el detalle de un cliente. Mismo espíritu que el checkbox "Presentado" de
    Presentaciones, pero acá el check despliega un formulario en vez de
-   guardar directamente. */
+   guardar directamente.
+
+   La <tr> en sí NUNCA se oculta con display:none -- lo que se anima al
+   abrir/cerrar es .fila-expandible-grid, con el truco de
+   grid-template-rows 0fr -> 1fr (a diferencia de "height", esto SÍ se
+   puede transicionar suave incluso cuando no se conoce el alto final del
+   contenido de antemano). .fila-expandible-contenido necesita
+   overflow:hidden para que el grid pueda colapsarlo a 0 real en vez de
+   quedarse en su alto mínimo de contenido. */
 .fila-expandible td {
   background-color: var(--color-fondo);
+  padding: 0;
+}
+
+.fila-expandible-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.fila-expandible-grid.abierta {
+  grid-template-rows: 1fr;
+}
+
+.fila-expandible-contenido {
+  overflow: hidden;
   padding: 16px;
 }
 

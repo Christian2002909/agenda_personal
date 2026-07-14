@@ -632,10 +632,21 @@ function dibujarTablaHonorarios() {
     `;
     elTablaHonorariosBody.appendChild(filaCliente);
 
+    // La fila en sí queda siempre en el flujo normal (nunca con
+    // display:none) -- lo que se anima al abrir/cerrar es el wrapper
+    // ".fila-expandible-grid" de adentro (grid-template-rows 0fr -> 1fr,
+    // ver css/style.css), truco que sí se puede transicionar suave a
+    // diferencia de animar el alto de una <tr>/<td> directamente.
     const filaExpandible = document.createElement('tr');
-    filaExpandible.className = 'fila-expandible oculto';
+    filaExpandible.className = 'fila-expandible';
     filaExpandible.dataset.expandibleId = cliente.id;
-    filaExpandible.innerHTML = `<td colspan="6"></td>`;
+    filaExpandible.innerHTML = `
+      <td colspan="6">
+        <div class="fila-expandible-grid">
+          <div class="fila-expandible-contenido"></div>
+        </div>
+      </td>
+    `;
     elTablaHonorariosBody.appendChild(filaExpandible);
   }
 }
@@ -741,10 +752,14 @@ if (elTablaHonorariosAnualBody) {
 
 // --- Filas expandibles de la tabla principal (pago / editar cuota / detalle) --
 
+// Cierra con una transición (ver .fila-expandible-grid en css/style.css):
+// se saca la clase "abierta" primero, y recién cuando termina la
+// transición se vacía el contenido -- si se vaciara de una, el contenido
+// desaparecería de golpe y no habría nada que "encoger" visualmente.
 function cerrarTodasLasFilasExpandibles() {
-  elTablaHonorariosBody.querySelectorAll('tr.fila-expandible').forEach((fila) => {
-    fila.classList.add('oculto');
-    fila.querySelector('td').innerHTML = '';
+  elTablaHonorariosBody.querySelectorAll('tr.fila-expandible .fila-expandible-grid.abierta').forEach((grid) => {
+    grid.classList.remove('abierta');
+    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
   });
   elTablaHonorariosBody.querySelectorAll('input[data-pagar-cliente]').forEach((casilla) => {
     casilla.checked = false;
@@ -753,22 +768,30 @@ function cerrarTodasLasFilasExpandibles() {
 
 function cerrarFilaExpandible(clienteId) {
   const fila = elTablaHonorariosBody.querySelector(`tr.fila-expandible[data-expandible-id="${clienteId}"]`);
-  if (fila) {
-    fila.classList.add('oculto');
-    fila.querySelector('td').innerHTML = '';
+  const grid = fila?.querySelector('.fila-expandible-grid');
+  if (grid) {
+    grid.classList.remove('abierta');
+    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
   }
   const casilla = elTablaHonorariosBody.querySelector(`input[data-pagar-cliente="${clienteId}"]`);
   if (casilla) casilla.checked = false;
 }
 
 // Abre la fila expandible del cliente con el HTML dado, cerrando primero
-// cualquier otra fila que hubiera quedado abierta (una sola a la vez).
+// cualquier otra fila que hubiera quedado abierta (una sola a la vez). El
+// contenido se llena ANTES de agregar "abierta" (en el mismo frame) para
+// que la transición de grid-template-rows tenga contra qué alto animar.
 function abrirFilaExpandible(clienteId, html) {
   cerrarTodasLasFilasExpandibles();
   const fila = elTablaHonorariosBody.querySelector(`tr.fila-expandible[data-expandible-id="${clienteId}"]`);
-  if (!fila) return;
-  fila.querySelector('td').innerHTML = html;
-  fila.classList.remove('oculto');
+  const grid = fila?.querySelector('.fila-expandible-grid');
+  if (!grid) return;
+  grid.querySelector('.fila-expandible-contenido').innerHTML = html;
+  // requestAnimationFrame para asegurar que el navegador ya pintó el
+  // estado "cerrado" (0fr) antes de pasar a "abierta" -- si se agregara la
+  // clase en el mismo tick que se llenó el contenido, algunos navegadores
+  // saltan directo al estado final sin animar.
+  requestAnimationFrame(() => grid.classList.add('abierta'));
 }
 
 // --- Período (mes+año o solo año) para el formulario de pago -------------
