@@ -1,24 +1,36 @@
 // js/presentaciones.js
 // -----------------------------------------------------------------------
 // Pantalla principal de la app. Reemplaza también a la antigua pestaña
-// Calendario (eliminada): para cada cliente se muestran, juntas, TODAS las
-// obligaciones que tiene asignadas (tabla cliente_obligaciones) que estén
-// vigentes y todavía NO presentadas -- mensuales y anuales por igual, cada
-// una con su fecha real de vencimiento (una anual sigue apareciendo como
-// pendiente desde que arranca su ejercicio en enero hasta que se marca
-// presentada, aunque su vencimiento real sea marzo/abril).
+// Calendario (eliminada): para cada cliente se muestra, en una TABLA
+// compacta, el estado del período VIGENTE de cada obligación que tiene
+// asignada (tabla cliente_obligaciones) -- mensuales y anuales por igual.
+//
+// A diferencia del diseño anterior (un bloque por cliente con checkboxes
+// apilados, que solo mostraba lo pendiente y en el que el cliente
+// desaparecía apenas se presentaba todo), ahora es una tabla de verdad:
+// una fila por cliente, una columna por obligación, y las filas/celdas
+// NUNCA desaparecen mientras la obligación siga asignada -- el checkbox
+// de la celda simplemente refleja si el período vigente ya se presentó o
+// no (con su fecha de vencimiento visible), y cuando el período cambia
+// (nuevo mes/año) la celda vuelve a mostrarse pendiente automáticamente.
+//
+// Las columnas de obligación son "automáticas" por defecto: la unión de
+// todas las obligaciones (mensuales y anuales) que tengan asignadas los
+// clientes que se están mostrando. Un selector adicional ("Obligación")
+// permite acotar la tabla a una sola obligación puntual, mismo patrón que
+// ya usa el filtro de Historial (js/historial.js). La obligación IDU
+// (periodicidad "manual") nunca es columna, ni automática ni seleccionable
+// a mano -- igual que antes.
 //
 // Los clientes se agrupan por terminación de RUC ("VENCIMIENTO N - FECHA
 // D", el día fijo por terminación -- no cambia entre obligaciones) igual
 // que la planilla de control que usaba el estudio antes de esta app.
-// Dentro de cada grupo, un bloque por cliente (Nombre/RUC/Clave una sola
-// vez) con la lista de sus obligaciones pendientes debajo, cada una con su
-// nombre + fecha de vencimiento y su propio checkbox de "Presentado".
 //
 // El selector "Ver cartera de" (Yo / cada perfil / Todos) filtra los
 // clientes mostrados por `clientes.responsable_id`; es solo un filtro de
 // visualización, no de acceso (cualquiera puede ver y marcar presentado
-// clientes de cualquier responsable).
+// clientes de cualquier responsable). Se aplica primero, y sobre esos
+// clientes se arma la tabla.
 // -----------------------------------------------------------------------
 
 // Todo el archivo va adentro de esta función para que sus variables no
@@ -35,6 +47,7 @@ const {
 } = require('./js/calendario-logica.js');
 
 const elFiltroCartera = document.getElementById('presentaciones-filtro-cartera');
+const elFiltroObligacion = document.getElementById('presentaciones-filtro-obligacion');
 const elGrupos = document.getElementById('presentaciones-grupos');
 const elSinPresentaciones = document.getElementById('sin-presentaciones');
 const elPresentacionesMensaje = document.getElementById('presentaciones-mensaje');
@@ -45,7 +58,8 @@ const VALOR_CARTERA_YO = 'yo';
 const VALOR_CARTERA_TODOS = 'todos';
 
 // Catálogo de obligaciones automáticas (todas menos "manual" = IDU), ya
-// filtrado según el panel RG 90 de Configuración.
+// filtrado según el panel RG 90 de Configuración. Es también el universo
+// de opciones del selector "Obligación" (más la opción "Todas").
 let obligacionesCache = [];
 // Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
 let perfilesCache = [];
@@ -58,8 +72,10 @@ let usuarioActualId = null;
 // cliente_obligaciones, configurada desde la pantalla de Clientes). Las
 // obligaciones "manual" (IDU) quedan afuera, aunque estén asignadas. Si el
 // registro ya existe -sea pendiente o ya presentado-, no lo toca. Esto
-// corre para TODAS las obligaciones de cada cliente, no depende de ningún
-// filtro de esta pantalla.
+// corre para TODAS las obligaciones de cada cliente (no solo las que la
+// tabla vaya a mostrar según el selector de "Obligación"), porque la fila
+// tiene que existir de antemano para que el checkbox de la celda pueda
+// tildarla sin fallar.
 async function asegurarPresentacionesDelPeriodoVigente() {
   const [
     { data: clientes, error: errorClientes },
@@ -107,7 +123,7 @@ async function asegurarPresentacionesDelPeriodoVigente() {
   if (error) throw error;
 }
 
-// --- Catálogo de obligaciones (para calcular vencimientos, ya no hay filtro) --
+// --- Catálogo de obligaciones (columnas automáticas + selector manual) ---
 
 async function cargarCatalogoObligaciones() {
   const [{ data, error }, { data: configuracion, error: errorConfiguracion }] = await Promise.all([
@@ -125,6 +141,34 @@ async function cargarCatalogoObligaciones() {
     ? (data || [])
     : (data || []).filter((o) => o.codigo !== 'RG90_MENSUAL' && o.codigo !== 'RG90_ANUAL');
 }
+
+// Arma las opciones del selector manual "Obligación": "Todas" (comportamiento
+// automático de columnas, ver dibujarPresentaciones) + una por obligación del
+// catálogo -- mismo patrón que ya usa el filtro de Historial, pero con esta
+// opción extra por defecto en vez de arrancar en IVA.
+function poblarFiltroObligacion() {
+  if (!elFiltroObligacion) return;
+
+  const seleccionActual = elFiltroObligacion.value;
+  elFiltroObligacion.innerHTML = '';
+
+  const opcionTodas = document.createElement('option');
+  opcionTodas.value = '';
+  opcionTodas.textContent = 'Todas';
+  elFiltroObligacion.appendChild(opcionTodas);
+
+  for (const obligacion of obligacionesCache) {
+    const opcion = document.createElement('option');
+    opcion.value = obligacion.id;
+    opcion.textContent = obligacion.nombre;
+    elFiltroObligacion.appendChild(opcion);
+  }
+
+  const sigueExistiendo = [...elFiltroObligacion.options].some((o) => o.value === seleccionActual);
+  elFiltroObligacion.value = sigueExistiendo ? seleccionActual : '';
+}
+
+if (elFiltroObligacion) elFiltroObligacion.addEventListener('change', () => dibujarPresentaciones());
 
 // --- Usuario logueado y catálogo de perfiles, para "Ver cartera de" -------
 
@@ -203,6 +247,7 @@ async function cargarPresentaciones() {
   try {
     await Promise.all([cargarCatalogoObligaciones(), cargarUsuarioActual(), cargarPerfiles()]);
     poblarFiltroCartera();
+    poblarFiltroObligacion();
     await asegurarPresentacionesDelPeriodoVigente();
     await dibujarPresentaciones();
   } catch (error) {
@@ -217,6 +262,10 @@ async function cargarPresentaciones() {
 async function dibujarPresentaciones() {
   try {
     const idsObligacionesPermitidas = new Set(obligacionesCache.map((o) => o.id));
+    // Selector manual de una sola obligación: '' (opción "Todas") vuelve al
+    // comportamiento automático de columnas; con un id puntual, la tabla se
+    // acota a esa única obligación.
+    const obligacionSeleccionadaId = elFiltroObligacion?.value ? Number(elFiltroObligacion.value) : null;
 
     const [
       { data: clientes, error: errorClientes },
@@ -250,56 +299,93 @@ async function dibujarPresentaciones() {
     const clientesFiltrados = filtrarClientesPorCartera(clientes || []);
     const clientesPorId = new Map(clientesFiltrados.map((c) => [c.id, c]));
 
-    // Arma, por cliente, la lista de sus obligaciones pendientes (vigentes
-    // y todavía no presentadas), con nombre y fecha real de vencimiento de
-    // cada una -- puede haber obligaciones mensuales y anuales mezcladas,
-    // cada una con su propia fecha.
-    const pendientesPorCliente = new Map();
-
+    // Por cliente, el conjunto de obligaciones "relevantes ahora": todas
+    // las que tenga asignadas en cliente_obligaciones, no sean "manual"
+    // (IDU) y pasen el filtro del panel RG 90 -- mensuales y anuales por
+    // igual. Para las anuales, obtenerPeriodoVigente(cierreFiscalMes) (ver
+    // más abajo, donde se calcula el período de cada celda) siempre
+    // devuelve el ejercicio que ya cerró más recientemente para ESE
+    // cliente -- nunca uno futuro, y el ancla pasa de un ejercicio al
+    // siguiente exactamente el mes posterior a cierreFiscalMes -- así que
+    // "estar asignada" ya alcanza para que la columna sea relevante los 12
+    // meses del año, sin un chequeo de mes aparte y sin hardcodear enero:
+    // con cierre en diciembre da "relevante todo el año" (el ejemplo del
+    // usuario, que arrancaba en enero), con cierre en junio da el mismo
+    // resultado corriendo el año fiscal, todo calculado por esa función.
+    // Si hay una obligación puntual elegida en el selector manual, se
+    // descarta cualquier otra.
+    const obligacionesAsignadasPorCliente = new Map();
     for (const fila of clienteObligaciones || []) {
       const cliente = clientesPorId.get(fila.cliente_id);
       const obligacion = fila.obligaciones;
 
       if (!cliente || !obligacion) continue;
       if (!idsObligacionesPermitidas.has(obligacion.id)) continue;
-      // Sin terminación de RUC no podemos calcular el día de vencimiento.
+      if (obligacionSeleccionadaId !== null && obligacion.id !== obligacionSeleccionadaId) continue;
+
+      if (!obligacionesAsignadasPorCliente.has(cliente.id)) {
+        obligacionesAsignadasPorCliente.set(cliente.id, new Set());
+      }
+      obligacionesAsignadasPorCliente.get(cliente.id).add(obligacion.id);
+    }
+
+    // Columnas = unión de las obligaciones relevantes de todos los clientes
+    // que se van a mostrar, en el mismo orden que el catálogo (obligacionesCache
+    // ya viene ordenado por id).
+    const idsColumnas = new Set();
+    for (const asignadas of obligacionesAsignadasPorCliente.values()) {
+      for (const id of asignadas) idsColumnas.add(id);
+    }
+    const columnas = obligacionesCache.filter((o) => idsColumnas.has(o.id));
+
+    // Una fila por cliente (con terminación de RUC cargada y al menos una
+    // obligación relevante); para cada columna, la celda queda en `null`
+    // si esa obligación puntual no está asignada a este cliente (celda
+    // "no aplica").
+    const filas = [];
+    for (const cliente of clientesFiltrados) {
       if (cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined) continue;
 
+      const asignadas = obligacionesAsignadasPorCliente.get(cliente.id);
+      if (!asignadas || asignadas.size === 0) continue;
+
       const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
-      const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
-      const periodoISO = formatearFechaISO(periodoAncla);
+      const celdas = new Map();
 
-      const clave = `${cliente.id}-${obligacion.id}-${periodoISO}`;
-      if (presentadosSet.has(clave)) continue; // ya presentado: no se muestra
+      for (const obligacion of columnas) {
+        if (!asignadas.has(obligacion.id)) {
+          celdas.set(obligacion.id, null);
+          continue;
+        }
 
-      const fechaVencimiento = calcularFechaVencimiento({
-        codigoObligacion: obligacion.codigo,
-        periodicidad: obligacion.periodicidad,
-        terminacionRuc: cliente.terminacion_ruc,
-        periodoAncla,
-        feriadosSet,
-        cierreFiscalMes,
-      });
-      if (!fechaVencimiento) continue;
+        const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
+        const periodoISO = formatearFechaISO(periodoAncla);
+        const fechaVencimiento = calcularFechaVencimiento({
+          codigoObligacion: obligacion.codigo,
+          periodicidad: obligacion.periodicidad,
+          terminacionRuc: cliente.terminacion_ruc,
+          periodoAncla,
+          feriadosSet,
+          cierreFiscalMes,
+        });
 
-      if (!pendientesPorCliente.has(cliente.id)) {
-        pendientesPorCliente.set(cliente.id, { cliente, obligaciones: [] });
+        if (!fechaVencimiento) {
+          celdas.set(obligacion.id, null);
+          continue;
+        }
+
+        const clave = `${cliente.id}-${obligacion.id}-${periodoISO}`;
+        celdas.set(obligacion.id, {
+          periodo: periodoISO,
+          fechaVencimiento,
+          presentado: presentadosSet.has(clave),
+        });
       }
-      pendientesPorCliente.get(cliente.id).obligaciones.push({
-        obligacionId: obligacion.id,
-        nombre: obligacion.nombre,
-        periodo: periodoISO,
-        fechaVencimiento,
-      });
+
+      filas.push({ cliente, celdas });
     }
 
-    // Dentro de cada bloque de cliente, la obligación con vencimiento más
-    // próximo aparece primero.
-    for (const entrada of pendientesPorCliente.values()) {
-      entrada.obligaciones.sort((a, b) => a.fechaVencimiento - b.fechaVencimiento);
-    }
-
-    dibujarGrupos([...pendientesPorCliente.values()]);
+    dibujarGrupos(filas, columnas);
     // La carga salió bien: si había quedado pegado un cartel de error de
     // un intento anterior (por ejemplo, el primero antes de loguearse),
     // lo ocultamos.
@@ -314,30 +400,30 @@ async function dibujarPresentaciones() {
 }
 
 // Agrupa por terminación de RUC (como la planilla de control: "VENCIMIENTO
-// N - FECHA D") y dibuja un bloque por cliente dentro de cada grupo, en
+// N - FECHA D") y dibuja, dentro de cada grupo, una tabla con una fila por
+// cliente y una columna por obligación (compartidas por todo el grupo), en
 // orden alfabético; la numeración es correlativa sin cortes entre grupos.
-function dibujarGrupos(entradas) {
+function dibujarGrupos(filas, columnas) {
   elGrupos.innerHTML = '';
 
-  if (entradas.length === 0) {
+  if (filas.length === 0 || columnas.length === 0) {
     elSinPresentaciones.classList.remove('oculto');
     return;
   }
   elSinPresentaciones.classList.add('oculto');
 
   const porTerminacion = new Map();
-  for (const entrada of entradas) {
-    const terminacion = entrada.cliente.terminacion_ruc;
-    if (terminacion === null || terminacion === undefined) continue;
+  for (const fila of filas) {
+    const terminacion = fila.cliente.terminacion_ruc;
     if (!porTerminacion.has(terminacion)) porTerminacion.set(terminacion, []);
-    porTerminacion.get(terminacion).push(entrada);
+    porTerminacion.get(terminacion).push(fila);
   }
 
   const terminacionesOrdenadas = [...porTerminacion.keys()].sort((a, b) => a - b);
   let numero = 0;
 
   for (const terminacion of terminacionesOrdenadas) {
-    const entradasDelGrupo = porTerminacion.get(terminacion)
+    const filasDelGrupo = porTerminacion.get(terminacion)
       .sort((a, b) => a.cliente.razon_social.localeCompare(b.cliente.razon_social));
 
     const grupo = document.createElement('div');
@@ -348,63 +434,92 @@ function dibujarGrupos(entradas) {
     encabezado.textContent = `VENCIMIENTO ${terminacion} - FECHA ${DIA_POR_TERMINACION_RUC[terminacion]}`;
     grupo.appendChild(encabezado);
 
-    const lista = document.createElement('div');
-    lista.className = 'lista-clientes-presentaciones';
+    const tabla = document.createElement('table');
+    tabla.className = 'tabla-clientes tabla-presentaciones';
+    tabla.innerHTML = `
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Cliente</th>
+          <th>RUC</th>
+          <th>Clave</th>
+          ${columnas.map((o) => `<th>${escaparHtmlPresentaciones(o.nombre)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = tabla.querySelector('tbody');
 
-    for (const entrada of entradasDelGrupo) {
+    for (const fila of filasDelGrupo) {
       numero += 1;
-      lista.appendChild(construirBloqueCliente(numero, entrada));
+      tbody.appendChild(construirFilaCliente(numero, fila, columnas));
     }
 
-    grupo.appendChild(lista);
+    grupo.appendChild(tabla);
+
+    // Envuelta en .tabla-scroll (mismo contenedor que usa Honorarios) para
+    // que, con varias columnas de obligación, la tabla scrollee
+    // horizontalmente en vez de desbordar la tarjeta en ventanas angostas.
+    const contenedorScroll = document.createElement('div');
+    contenedorScroll.className = 'tabla-scroll';
+    contenedorScroll.appendChild(tabla);
+    grupo.appendChild(contenedorScroll);
+
     elGrupos.appendChild(grupo);
   }
 }
 
-// Un solo bloque por cliente: Nombre/RUC/Clave una sola vez arriba, y
-// debajo la lista de sus obligaciones pendientes, cada una con su nombre +
-// fecha de vencimiento y su propio checkbox de "Presentado".
-function construirBloqueCliente(numero, { cliente, obligaciones }) {
-  const bloque = document.createElement('article');
-  bloque.className = 'cliente-presentacion';
+// Una fila de la tabla: datos del cliente + una celda por columna de
+// obligación (checkbox editable si está asignada, "—" si no aplica).
+function construirFilaCliente(numero, { cliente, celdas }, columnas) {
+  const tr = document.createElement('tr');
 
-  const encabezado = document.createElement('div');
-  encabezado.className = 'cliente-presentacion-encabezado';
-  encabezado.innerHTML = `
-    <span class="cliente-presentacion-numero">${numero}</span>
-    <div class="cliente-presentacion-datos">
-      <button class="boton-link" data-editar-cliente="${cliente.id}">${escaparHtmlPresentaciones(cliente.razon_social)}</button>
-      <span class="cliente-presentacion-detalle">RUC: ${escaparHtmlPresentaciones(cliente.ruc)} &middot; Clave: ${escaparHtmlPresentaciones(cliente.clave_marangatu)}</span>
-    </div>
+  const celdasHtml = columnas.map((obligacion) => {
+    const info = celdas.get(obligacion.id);
+    if (!info) return '<td class="celda-obligacion-na">—</td>';
+    return construirCeldaObligacionHtml({
+      clienteId: cliente.id,
+      obligacionId: obligacion.id,
+      periodo: info.periodo,
+      presentado: info.presentado,
+      fechaVencimiento: info.fechaVencimiento,
+    });
+  }).join('');
+
+  tr.innerHTML = `
+    <td>${numero}</td>
+    <td><button class="boton-link" data-editar-cliente="${cliente.id}">${escaparHtmlPresentaciones(cliente.razon_social)}</button></td>
+    <td>${escaparHtmlPresentaciones(cliente.ruc)}</td>
+    <td>${escaparHtmlPresentaciones(cliente.clave_marangatu)}</td>
+    ${celdasHtml}
   `;
-  bloque.appendChild(encabezado);
 
-  const lista = document.createElement('ul');
-  lista.className = 'lista-obligaciones-pendientes';
+  return tr;
+}
 
-  for (const obligacion of obligaciones) {
-    const li = document.createElement('li');
-    li.className = 'obligacion-pendiente';
-    li.innerHTML = `
-      <div class="obligacion-pendiente-info">
-        <span class="obligacion-pendiente-nombre">${escaparHtmlPresentaciones(obligacion.nombre)}</span>
-        <span class="obligacion-pendiente-fecha">Vence ${formatearFechaVisiblePresentaciones(obligacion.fechaVencimiento)}</span>
-      </div>
-      <label class="obligacion-pendiente-check">
+// Celda editable de una obligación: todo el área de la celda es un <label>
+// que envuelve el checkbox de "presentado" (mismo patrón que ya usa la
+// grilla de Historial, celda-historial-toggle/-presentado/-pendiente),
+// mostrando siempre la fecha de vencimiento del período vigente -- tanto
+// si todavía está pendiente como si ya se presentó.
+function construirCeldaObligacionHtml({ clienteId, obligacionId, periodo, presentado, fechaVencimiento }) {
+  const estadoClase = presentado ? 'celda-historial-presentado' : 'celda-historial-pendiente';
+  const fechaTexto = formatearFechaVisiblePresentaciones(fechaVencimiento);
+  const titulo = presentado ? `Presentado (venció ${fechaTexto})` : `Pendiente, vence ${fechaTexto}`;
+  return `
+    <td class="celda-historial ${estadoClase}">
+      <label class="celda-historial-toggle" title="${escaparHtmlPresentaciones(titulo)}">
         <input
           type="checkbox"
-          data-cliente-id="${cliente.id}"
-          data-obligacion-id="${obligacion.obligacionId}"
-          data-periodo="${obligacion.periodo}"
+          data-cliente-id="${clienteId}"
+          data-obligacion-id="${obligacionId}"
+          data-periodo="${periodo}"
+          ${presentado ? 'checked' : ''}
         />
-        Presentado
+        <span>${fechaTexto}</span>
       </label>
-    `;
-    lista.appendChild(li);
-  }
-
-  bloque.appendChild(lista);
-  return bloque;
+    </td>
+  `;
 }
 
 function formatearFechaVisiblePresentaciones(fecha) {
@@ -459,8 +574,10 @@ elGrupos.addEventListener('change', async (evento) => {
       );
 
     if (error) throw error;
-    // Al marcar presentada, la obligación deja de ser "pendiente" y
-    // desaparece del bloque del cliente -- repintamos toda la lista.
+    // La fila/celda del cliente sigue en pantalla tanto si se tildó como
+    // si se destildó (a diferencia del diseño anterior, acá nada
+    // desaparece) -- repintamos para reflejar el nuevo estado (checkbox +
+    // color de fondo de la celda).
     await dibujarPresentaciones();
   } catch (error) {
     console.error('Error al actualizar presentación:', error);

@@ -16,19 +16,57 @@
   <!-- ============================== -->
   <!-- Se muestra sola al arrancar. js/auth.js la oculta y muestra
        #app-autenticado apenas hay una sesión válida. No hay alta de
-       usuarios desde acá: se crean a mano en el dashboard de Supabase. -->
+       usuarios desde acá: se crean a mano en el dashboard de Supabase o
+       desde Configuración → Usuarios.
+
+       Dos pasos, manejados por js/auth.js:
+       1) #login-lista-nombres: primera pantalla, "elegí tu nombre" --
+          lista armada con la vista pública perfiles_publicos (ver
+          schema.sql sección 15.2), la única lectura sin sesión de todo el
+          esquema.
+       2) #form-login: contraseña de la persona elegida (o email+contraseña
+          completo si no hay ningún nombre en la lista todavía, ver el link
+          de más abajo). Si hay una sesión guardada en esta PC para el
+          nombre elegido (ver "Recordar", localStorage), este paso se
+          saltea solo. -->
   <section id="vista-login" class="vista-login">
     <div class="tarjeta tarjeta-login">
       <h2>Iniciar sesión</h2>
       <div id="login-mensaje" class="mensaje mensaje-error oculto"></div>
-      <form id="form-login">
-        <div class="fila-form">
+
+      <!-- Paso 1: lista de nombres -->
+      <div id="login-lista-nombres">
+        <p class="login-instruccion">¿Quién sos?</p>
+        <div id="login-nombres-contenedor" class="login-nombres-contenedor">
+          <p class="texto-ayuda">Cargando...</p>
+        </div>
+        <div class="acciones-form">
+          <button type="button" id="btn-login-otro-usuario" class="boton-link">
+            Ingresar con email y contraseña
+          </button>
+        </div>
+      </div>
+
+      <!-- Paso 2: contraseña -->
+      <form id="form-login" class="oculto">
+        <button type="button" id="btn-login-volver" class="boton-link boton-login-volver">‹ Volver</button>
+        <p id="login-nombre-elegido" class="login-instruccion oculto"></p>
+        <div class="fila-form" id="fila-login-email">
           <label for="login-email">Email</label>
-          <input type="email" id="login-email" required autocomplete="username" />
+          <input type="email" id="login-email" autocomplete="username" />
         </div>
         <div class="fila-form">
           <label for="login-password">Contraseña</label>
-          <input type="password" id="login-password" required autocomplete="current-password" />
+          <div class="input-con-boton">
+            <input type="password" id="login-password" required autocomplete="current-password" />
+            <button type="button" id="btn-ver-password" class="boton-link boton-ver-password">Ver</button>
+          </div>
+        </div>
+        <div class="fila-form fila-checkbox">
+          <label>
+            <input type="checkbox" id="login-recordar" checked />
+            Recordar en esta PC
+          </label>
         </div>
         <div class="acciones-form">
           <button type="submit" class="boton boton-primario">Ingresar</button>
@@ -84,13 +122,17 @@
            además permite abrir un cliente acá para editarlo. -->
 
       <!-- Importar/exportar la cartera completa de clientes en Excel
-           (.xlsx). El importador actualiza por RUC exacto si el cliente ya
-           existe, o crea uno nuevo si no -- ver js/clientes.js. -->
+           (.xlsx), en 2 hojas: "Clientes" (datos básicos + obligaciones) y
+           "Honorarios" (cuota mensual/anual, deuda congelada y otros
+           gastos), cruzadas por RUC. El importador actualiza por RUC
+           exacto si el cliente ya existe, o crea uno nuevo si no -- ver
+           js/clientes.js. -->
       <section class="tarjeta">
         <h2>Importar / Exportar Clientes (Excel)</h2>
         <div class="acciones-form">
           <button type="button" id="btn-importar-clientes-excel" class="boton boton-secundario">Importar desde Excel</button>
           <button type="button" id="btn-exportar-clientes-excel" class="boton boton-secundario">Exportar a Excel</button>
+          <button type="button" id="btn-plantilla-clientes-excel" class="boton boton-secundario">Descargar Plantilla de Clientes</button>
           <input type="file" id="input-importar-clientes-excel" accept=".xlsx" class="oculto" />
         </div>
         <div id="clientes-importar-resumen" class="resumen-importacion oculto">
@@ -182,20 +224,29 @@
          sola obligación a la vez. -->
     <section id="vista-presentaciones" class="vista">
       <section class="tarjeta">
-        <h2>Presentaciones Pendientes</h2>
-        <div class="fila-form">
-          <label for="presentaciones-filtro-cartera">Responsable:</label>
-          <select id="presentaciones-filtro-cartera">
-            <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
-                 "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
-          </select>
+        <h2>Presentaciones</h2>
+        <div class="fila-form-filtros-pagos">
+          <div class="fila-form">
+            <label for="presentaciones-filtro-cartera">Responsable:</label>
+            <select id="presentaciones-filtro-cartera">
+              <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
+                   "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
+            </select>
+          </div>
+          <div class="fila-form">
+            <label for="presentaciones-filtro-obligacion">Obligación:</label>
+            <select id="presentaciones-filtro-obligacion">
+              <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
+                   "Todas" (comportamiento automático) y una por obligación del catálogo. -->
+            </select>
+          </div>
         </div>
         <div id="presentaciones-mensaje" class="mensaje mensaje-error oculto"></div>
         <div id="presentaciones-grupos">
           <!-- Los grupos "VENCIMIENTO N - FECHA D" se arman dinámicamente desde js/presentaciones.js -->
         </div>
         <p id="sin-presentaciones" class="sin-datos oculto">
-          No hay obligaciones pendientes para mostrar.
+          No hay clientes con obligaciones para mostrar.
         </p>
       </section>
     </section>
@@ -241,25 +292,6 @@
     <section id="vista-honorarios" class="vista oculto">
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
-
-      <!-- Importar/exportar en Excel (.xlsx): la cuota mensual/anual ahora
-           se importa junto con el Excel de Clientes (ver js/clientes.js) --
-           acá solo queda el importador del historial de pagos y el
-           exportador con dos hojas (Honorarios + Historial de Pagos), ver
-           js/honorarios.js. -->
-      <section class="tarjeta">
-        <h2>Importar / Exportar Honorarios (Excel)</h2>
-        <div class="acciones-form grupo-botones-excel">
-          <button type="button" id="btn-importar-pagos-excel" class="boton boton-secundario">Importar Historial de Pagos desde Excel</button>
-          <input type="file" id="input-importar-pagos-excel" accept=".xlsx" class="oculto" />
-          <button type="button" id="btn-exportar-honorarios-excel" class="boton boton-secundario">Exportar a Excel</button>
-        </div>
-        <div id="honorarios-importar-resumen" class="resumen-importacion oculto">
-          <p id="honorarios-importar-resumen-titulo" class="fila-form-titulo"></p>
-          <p id="honorarios-importar-resumen-texto"></p>
-          <ul id="honorarios-importar-resumen-detalle" class="lista-resumen-importacion"></ul>
-        </div>
-      </section>
 
       <!-- Honorario pactado por cliente. Registrar un pago, editar la cuota
            pactada y ver el detalle de un cliente se hacen todos desde acá,

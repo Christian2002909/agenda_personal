@@ -25,6 +25,23 @@
 // de "Debe", hasta que se marca "pagada" (no genera un pago en
 // pagos_honorarios, ver comentario en schema.sql).
 //
+// "Otros gastos" (tabla otros_gastos_honorarios): cargos sueltos por vez
+// (un trámite puntual, un gasto adelantado, etc.), completamente
+// INDEPENDIENTES de la cuota mensual/anual -- a propósito NO participan de
+// calcularSaldoPorTipo/calcularEstadoHonorario, tienen su propio badge
+// aparte ("Otros gastos pendientes: Gs. X") y su propio botón/panel. Se
+// cargan con descripción + monto + fecha del cargo, y se marcan pagados
+// con su propio mini-formulario (fecha de pago, forma de pago, N° de
+// recibo opcional -- mismos campos que pagos_honorarios, reusando ese
+// patrón).
+//
+// Esta pantalla es 100% manual: no tiene ningún botón de Excel (importar,
+// exportar ni plantillas). El Excel de Clientes (js/clientes.js) es el
+// único lugar con Excel de esta app -- su Hoja 2 "Honorarios" permite
+// cargar cuota mensual/anual, deuda congelada y un otro gasto por cliente
+// en una carga masiva inicial; a partir de ahí todo se gestiona acá, a
+// mano.
+//
 // Registrar un pago, editar la cuota pactada y ver el detalle de un
 // cliente se hacen todos expandiendo una fila-formulario debajo de la fila
 // del cliente en la tabla principal (mismo espíritu que el checkbox
@@ -46,20 +63,11 @@
 
 const supabaseHonorarios = require('./js/supabaseClient.js');
 const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
-const { leerFilasDeArchivoExcel, descargarComoExcel, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
 const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
 const elHonorariosBuscar = document.getElementById('honorarios-buscar');
 const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
-
-const elBtnImportarPagos = document.getElementById('btn-importar-pagos-excel');
-const elInputImportarPagos = document.getElementById('input-importar-pagos-excel');
-const elBtnExportarHonorarios = document.getElementById('btn-exportar-honorarios-excel');
-const elImportarResumenHonorarios = document.getElementById('honorarios-importar-resumen');
-const elImportarResumenHonorariosTitulo = document.getElementById('honorarios-importar-resumen-titulo');
-const elImportarResumenHonorariosTexto = document.getElementById('honorarios-importar-resumen-texto');
-const elImportarResumenHonorariosDetalle = document.getElementById('honorarios-importar-resumen-detalle');
 
 const elTablaHonorariosBody = document.getElementById('tabla-honorarios-body');
 const elSinHonorarios = document.getElementById('sin-honorarios');
@@ -113,6 +121,9 @@ let pagosCache = [];
 // un cliente+tipo, diferida sin perdonarse -- ver contarPeriodosAdeudables
 // y dibujarBadgesDeudaCongelada más abajo.
 let deudasCongeladasCache = [];
+// Otros gastos (tabla otros_gastos_honorarios): cargos sueltos por vez,
+// independientes de la cuota -- ver dibujarBadgeOtrosGastos más abajo.
+let otrosGastosCache = [];
 let configuracionEstudio = null;
 // Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
 let perfilesCache = [];
@@ -202,10 +213,22 @@ async function cargarUsuarioActual() {
   }
 }
 
+// A diferencia de las cargas imprescindibles de cargarHonorarios() (ver
+// comentario grande ahí), esta NO relanza el error hacia arriba: el
+// catálogo de perfiles solo se usa para sumar más opciones al selector
+// "Ver cartera de" ("Yo" y "Todos" no dependen de esto), así que si esta
+// consulta puntual falla (por ejemplo, un hiccup de red), el resto de la
+// pantalla igual tiene que poder cargar -- mismo criterio defensivo que ya
+// usa js/clientes.js con su propia cargarPerfiles().
 async function cargarPerfiles() {
-  const { data, error } = await supabaseHonorarios.from('perfiles').select('id, nombre').order('nombre');
-  if (error) throw error;
-  perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+  try {
+    const { data, error } = await supabaseHonorarios.from('perfiles').select('id, nombre').order('nombre');
+    if (error) throw error;
+    perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+  } catch (error) {
+    console.error('Error al cargar la lista de perfiles para "Ver cartera de":', error);
+    perfilesCache = [];
+  }
 }
 
 // Arma las opciones "Yo" / cada perfil / "Todos". Si ya había una selección
@@ -265,16 +288,43 @@ function filtrarClientesPorCartera(clientes) {
 
 // --- Carga inicial -------------------------------------------------------
 
+// Carga "segura" de una de las tres tablas complementarias (deuda
+// congelada, otros gastos, configuración del estudio): si esta consulta
+// puntual falla -- por ejemplo, porque todavía no se volvió a pegar
+// schema.sql en Supabase después de agregar esa tabla/feature (ver
+// CLAUDE.md, "Database") -- NO debe tumbar el resto de la pantalla. Antes,
+// un solo error acá (aunque no tuviera nada que ver con la tabla principal
+// de Honorarios) hacía que cargarHonorarios() entero cayera al catch antes
+// de llegar a poblarFiltroCartera()/dibujarTablaHonorarios(), dejando
+// TANTO la tabla principal COMO el selector "Ver cartera de" -- ni
+// siquiera la opción "Yo" -- completamente en blanco, con el único aviso
+// siendo un cartel que además se auto-oculta a los 4 segundos (ver
+// mostrarMensajeHonorarios). Cae a un valor seguro y anota una advertencia
+// legible en vez de relanzar el error -- mismo espíritu defensivo que ya
+// usa excel-utils.js con el require() de exceljs.
+async function cargarTablaComplementariaSegura(tabla, etiqueta, construirQuery, advertencias) {
+  try {
+    const { data, error } = await construirQuery(supabaseHonorarios.from(tabla));
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error(`Error al cargar "${etiqueta}":`, error);
+    advertencias.push(etiqueta);
+    return null;
+  }
+}
+
 async function cargarHonorarios() {
   if (!supabaseHonorarios) return;
 
   try {
+    // Datos imprescindibles: sin esto la pantalla no tiene nada que
+    // mostrar, así que acá un error sigue siendo fatal para toda la carga
+    // (ver el catch de abajo).
     const [
       { data: clientes, error: errorClientes },
       { data: honorarios, error: errorHonorarios },
       { data: pagos, error: errorPagos },
-      { data: deudasCongeladas, error: errorDeudasCongeladas },
-      { data: configuracion, error: errorConfiguracion },
     ] = await Promise.all([
       supabaseHonorarios
         .from('clientes')
@@ -282,20 +332,42 @@ async function cargarHonorarios() {
         .order('razon_social'),
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
-      supabaseHonorarios.from('deudas_congeladas_honorarios').select('*'),
-      supabaseHonorarios.from('configuracion_estudio').select('*').eq('id', 1).maybeSingle(),
     ]);
 
     if (errorClientes) throw errorClientes;
     if (errorHonorarios) throw errorHonorarios;
     if (errorPagos) throw errorPagos;
-    if (errorDeudasCongeladas) throw errorDeudasCongeladas;
-    if (errorConfiguracion) throw errorConfiguracion;
 
     clientesCacheHonorarios = clientes || [];
     honorariosCache = honorarios || [];
     pagosCache = pagos || [];
+
+    // Datos complementarios (ver cargarTablaComplementariaSegura arriba):
+    // cada uno cae a un valor seguro por separado si falla, en vez de
+    // tumbar toda la pantalla.
+    const advertencias = [];
+    const [deudasCongeladas, otrosGastos, configuracion] = await Promise.all([
+      cargarTablaComplementariaSegura(
+        'deudas_congeladas_honorarios',
+        'Deuda congelada',
+        (query) => query.select('*'),
+        advertencias
+      ),
+      cargarTablaComplementariaSegura(
+        'otros_gastos_honorarios',
+        'Otros Gastos',
+        (query) => query.select('*').order('fecha_cargo', { ascending: false }),
+        advertencias
+      ),
+      cargarTablaComplementariaSegura(
+        'configuracion_estudio',
+        'Configuración del estudio',
+        (query) => query.select('*').eq('id', 1).maybeSingle(),
+        advertencias
+      ),
+    ]);
     deudasCongeladasCache = deudasCongeladas || [];
+    otrosGastosCache = otrosGastos || [];
     configuracionEstudio = configuracion || null;
 
     await Promise.all([cargarUsuarioActual(), cargarPerfiles()]);
@@ -305,10 +377,20 @@ async function cargarHonorarios() {
     dibujarSeccionHonorariosAnual();
     poblarFiltroAnioPagos();
     dibujarTablaPagos();
-    // La carga salió bien: si había quedado pegado un cartel de error de
-    // un intento anterior (por ejemplo, el primero antes de loguearse), lo
-    // ocultamos.
-    if (elHonorariosMensaje) elHonorariosMensaje.classList.add('oculto');
+
+    if (advertencias.length > 0) {
+      // Se ve el resto de la pantalla igual (tabla principal, selector de
+      // cartera, historial de pagos); solo avisamos qué NO se pudo cargar.
+      mostrarMensajeHonorarios(
+        `Los honorarios se cargaron, pero no se pudo traer: ${advertencias.join(', ')}. Puede que falte volver a correr schema.sql en Supabase (ver CLAUDE.md).`,
+        'error'
+      );
+    } else if (elHonorariosMensaje) {
+      // La carga salió bien: si había quedado pegado un cartel de error de
+      // un intento anterior (por ejemplo, el primero antes de loguearse), lo
+      // ocultamos.
+      elHonorariosMensaje.classList.add('oculto');
+    }
   } catch (error) {
     console.error('Error al cargar honorarios:', error);
     mostrarMensajeHonorarios('No se pudieron cargar los honorarios.', 'error');
@@ -464,6 +546,30 @@ function dibujarBadgesDeudaCongelada(clienteId, tipoFiltro = null) {
     .join(' ');
 }
 
+// --- Otros gastos (cargos sueltos, independientes de la cuota) -----------
+
+// Todos los "otros gastos" TODAVÍA pendientes (pagado = false) de un
+// cliente -- para el badge y el panel de gestión.
+function otrosGastosPendientesDeCliente(clienteId) {
+  return otrosGastosCache.filter((gasto) => gasto.cliente_id === clienteId && !gasto.pagado);
+}
+
+function totalOtrosGastosPendientes(clienteId) {
+  return otrosGastosPendientesDeCliente(clienteId).reduce((total, gasto) => total + Number(gasto.monto), 0);
+}
+
+// Badge secundario "Otros gastos pendientes: Gs. X" -- mismo estilo neutro
+// (badge-neutro) que "Deuda congelada", a propósito: los tres indicadores
+// de esta pantalla (Al día/Debe, Deuda congelada, Otros gastos) tienen que
+// leerse como parte del mismo sistema visual, no como cosas sueltas. NO
+// suma nada al saldo de calcularSaldoPorTipo/calcularEstadoHonorario --
+// es intencionalmente un número aparte.
+function dibujarBadgeOtrosGastos(clienteId) {
+  const total = totalOtrosGastosPendientes(clienteId);
+  if (total <= 0) return '';
+  return `<span class="badge badge-neutro" title="Cargos sueltos (no la cuota mensual/anual) todavía no pagados por este cliente">Otros gastos pendientes: ${formatearGuaranies(total)}</span>`;
+}
+
 function dibujarTablaHonorarios() {
   elTablaHonorariosBody.innerHTML = '';
 
@@ -489,19 +595,21 @@ function dibujarTablaHonorarios() {
     const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
     const resultado = calcularEstadoHonorario(honorario, cliente);
     const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+    const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
 
     const filaCliente = document.createElement('tr');
     filaCliente.innerHTML = `
       <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
       <td>${honorario?.monto_mensual ? formatearGuaranies(honorario.monto_mensual) : '—'}</td>
       <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
-      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}</td>
+      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}${badgeOtrosGastos ? `<br />${badgeOtrosGastos}` : ''}</td>
       <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
       <td>
         <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
         <button type="button" class="boton boton-chico" data-editar-cuota-id="${cliente.id}">Editar cuota</button>
         <button type="button" class="boton boton-chico" data-detalle-cliente-id="${cliente.id}">Detalle</button>
         <button type="button" class="boton boton-chico" data-congelar-deuda-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Deuda congelada</button>
+        <button type="button" class="boton boton-chico" data-otros-gastos-id="${cliente.id}">Otros Gastos</button>
       </td>
     `;
     elTablaHonorariosBody.appendChild(filaCliente);
@@ -971,6 +1079,161 @@ async function marcarDeudaCongeladaPagada(deudaId) {
   }
 }
 
+// --- Otros gastos (cargos sueltos, independientes de la cuota) -----------
+//
+// Mismo espíritu de fila-expandible que el resto de esta pantalla: un
+// panel que junta la lista de "otros gastos" TODAVÍA pendientes del
+// cliente (con botón "Marcar pagado" cada uno, que despliega un
+// mini-formulario propio con fecha de pago/forma de pago/N° de recibo -- a
+// diferencia de "Marcar cobrada" de Deuda Congelada, acá SÍ hace falta un
+// formulario porque el pedido pide poder cargar esos tres datos) y un
+// mini-formulario para cargar un gasto nuevo (descripción + monto + fecha
+// del cargo). Los gastos ya pagados no aparecen en esta lista -- se ven en
+// el "Detalle" del cliente (construirDetalleClienteHtml más abajo), que
+// lista TODOS (pagados y pendientes).
+
+function construirListaOtrosGastosPendientesHtml(clienteId) {
+  const pendientes = otrosGastosPendientesDeCliente(clienteId);
+  if (pendientes.length === 0) {
+    return '<p class="sin-datos">Este cliente no tiene otros gastos pendientes.</p>';
+  }
+
+  return `
+    <ul class="lista-resumen-importacion">
+      ${pendientes
+        .map((gasto) => `
+          <li data-fila-gasto-id="${gasto.id}">
+            ${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}
+            -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}
+            <button type="button" class="boton boton-chico" data-marcar-gasto-pagado-id="${gasto.id}">Marcar pagado</button>
+          </li>
+        `)
+        .join('')}
+    </ul>`;
+}
+
+// Mini-formulario que reemplaza, en el lugar, el <li> de un gasto pendiente
+// cuando se hace clic en "Marcar pagado" -- mismos campos que
+// pagos_honorarios (fecha de pago, forma de pago, N° de recibo opcional).
+function construirSubformularioMarcarGastoPagadoHtml(gasto) {
+  return `
+    <form class="form-marcar-gasto-pagado-inline" data-gasto-id="${gasto.id}">
+      <p>${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}</p>
+      <div class="grilla-form-inline">
+        <div class="fila-form">
+          <label>Fecha de Pago</label>
+          <input type="date" class="campo-gasto-fecha-pago" value="${formatearFechaISO(new Date())}" />
+        </div>
+        <div class="fila-form">
+          <label>Forma de Pago</label>
+          <select class="campo-gasto-forma-pago">
+            <option value="efectivo" selected>Efectivo</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </div>
+        <div class="fila-form">
+          <label>N° de Recibo</label>
+          <input type="text" class="campo-gasto-recibo" placeholder="Ej: 0231" spellcheck="true" />
+        </div>
+      </div>
+      <div class="acciones-form">
+        <button type="submit" class="boton boton-primario boton-chico">Marcar Pagado</button>
+        <button type="button" class="boton boton-secundario boton-chico" data-cancelar-marcar-gasto>Cancelar</button>
+      </div>
+    </form>
+  `;
+}
+
+function construirFormularioOtrosGastosHtml(cliente) {
+  return `
+    <div class="detalle-cliente-inline">
+      <h3 class="fila-form-titulo">Otros Gastos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      ${construirListaOtrosGastosPendientesHtml(cliente.id)}
+      <form class="form-nuevo-gasto-inline" data-cliente-id="${cliente.id}">
+        <h3 class="fila-form-titulo">Cargar gasto nuevo</h3>
+        <div class="grilla-form-inline">
+          <div class="fila-form">
+            <label>Descripción</label>
+            <input type="text" class="campo-gasto-descripcion" required spellcheck="true" placeholder="Ej: Trámite de habilitación municipal" />
+          </div>
+          <div class="fila-form">
+            <label>Monto (Gs.)</label>
+            <input type="text" inputmode="numeric" class="campo-gasto-monto" required />
+          </div>
+          <div class="fila-form">
+            <label>Fecha del Cargo</label>
+            <input type="date" class="campo-gasto-fecha-cargo" value="${formatearFechaISO(new Date())}" />
+          </div>
+        </div>
+        <div class="acciones-form">
+          <button type="submit" class="boton boton-primario boton-chico">Cargar Gasto</button>
+          <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function abrirFormularioOtrosGastos(clienteId) {
+  const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+  if (!cliente) return;
+  abrirFilaExpandible(clienteId, construirFormularioOtrosGastosHtml(cliente));
+}
+
+async function guardarGastoNuevoInline(form) {
+  const clienteId = Number(form.dataset.clienteId);
+  const descripcion = form.querySelector('.campo-gasto-descripcion').value.trim();
+  const monto = Number(quitarPuntos(form.querySelector('.campo-gasto-monto').value));
+  const fechaCargo = form.querySelector('.campo-gasto-fecha-cargo').value || formatearFechaISO(new Date());
+
+  if (!descripcion) {
+    mostrarMensajeHonorarios('Cargá una descripción para el gasto.', 'error');
+    return;
+  }
+  if (!monto || monto <= 0) {
+    mostrarMensajeHonorarios('Cargá un monto válido.', 'error');
+    return;
+  }
+
+  try {
+    const { error } = await supabaseHonorarios.from('otros_gastos_honorarios').insert({
+      cliente_id: clienteId,
+      descripcion,
+      monto,
+      fecha_cargo: fechaCargo,
+    });
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto cargado correctamente.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al cargar el gasto:', error);
+    mostrarMensajeHonorarios('No se pudo cargar el gasto.', 'error');
+  }
+}
+
+async function guardarGastoPagadoInline(form) {
+  const gastoId = Number(form.dataset.gastoId);
+  const fechaPago = form.querySelector('.campo-gasto-fecha-pago').value || formatearFechaISO(new Date());
+  const formaPago = form.querySelector('.campo-gasto-forma-pago').value;
+  const numeroRecibo = form.querySelector('.campo-gasto-recibo').value.trim() || null;
+
+  try {
+    const { error } = await supabaseHonorarios
+      .from('otros_gastos_honorarios')
+      .update({ pagado: true, fecha_pago: fechaPago, forma_pago: formaPago, numero_recibo: numeroRecibo })
+      .eq('id', gastoId);
+    if (error) throw error;
+
+    mostrarMensajeHonorarios('Gasto marcado como pagado.');
+    await cargarHonorarios();
+  } catch (error) {
+    console.error('Error al marcar el gasto como pagado:', error);
+    mostrarMensajeHonorarios('No se pudo marcar el gasto como pagado.', 'error');
+  }
+}
+
 // --- Detalle de pagos de un cliente ---------------------------------------
 
 // Fila de una tabla de pagos (Historial de Pagos o el detalle de un
@@ -992,6 +1255,33 @@ function construirFilaPagoHtml(pago, cliente) {
   `;
 }
 
+// Lista COMPLETA (pagados y pendientes) de "otros gastos" de un cliente,
+// para el Detalle -- a diferencia de construirListaOtrosGastosPendientesHtml
+// (usada en el panel de "Otros Gastos", que solo lista los pendientes
+// porque ahí lo que importa es poder marcarlos pagados), acá es de solo
+// lectura, sin botones de acción.
+function construirListaOtrosGastosDetalleHtml(clienteId) {
+  const gastos = otrosGastosCache
+    .filter((gasto) => gasto.cliente_id === clienteId)
+    .sort((a, b) => (a.fecha_cargo < b.fecha_cargo ? 1 : -1));
+
+  if (gastos.length === 0) {
+    return '<p class="sin-datos">Este cliente no tiene otros gastos cargados.</p>';
+  }
+
+  return `
+    <ul class="lista-resumen-importacion">
+      ${gastos
+        .map((gasto) => {
+          const detallePago = gasto.pagado
+            ? ` -- pagado el ${formatearFechaVisibleHonorarios(gasto.fecha_pago)} (${formatearFormaPago(gasto.forma_pago)}${gasto.numero_recibo ? `, recibo ${escaparHtmlHonorarios(gasto.numero_recibo)}` : ''})`
+            : ' -- <strong>pendiente</strong>';
+          return `<li>${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)} -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}${detallePago}</li>`;
+        })
+        .join('')}
+    </ul>`;
+}
+
 function construirDetalleClienteHtml(cliente) {
   const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
   const resultado = calcularEstadoHonorario(honorario, cliente);
@@ -1005,12 +1295,14 @@ function construirDetalleClienteHtml(cliente) {
     : `<tr><td colspan="${PAGO_COLSPAN}" class="sin-datos">Todavía no se registró ningún pago.</td></tr>`;
 
   const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+  const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
 
   return `
     <div class="detalle-cliente-inline">
       <h3 class="fila-form-titulo">Historial de Pagos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
       <p>Saldo pendiente: ${dibujarBadgeEstado(resultado)}</p>
       ${badgesDeudaCongelada ? `<p>${badgesDeudaCongelada}</p>` : ''}
+      ${badgeOtrosGastos ? `<p>${badgeOtrosGastos}</p>` : ''}
       <div class="tabla-scroll">
         <table class="tabla-clientes">
           <thead>
@@ -1022,6 +1314,8 @@ function construirDetalleClienteHtml(cliente) {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
+      <h3 class="fila-form-titulo">Otros Gastos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
+      ${construirListaOtrosGastosDetalleHtml(cliente.id)}
       <div class="acciones-form">
         <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
       </div>
@@ -1073,7 +1367,7 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
 // (pago, editar cuota y congelar deuda), armados dinámicamente dentro de
 // esta tabla.
 elTablaHonorariosBody.addEventListener('input', (evento) => {
-  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual, .campo-deuda-monto');
+  const campoDinero = evento.target.closest('.campo-pago-monto, .campo-cuota-mensual, .campo-cuota-anual, .campo-deuda-monto, .campo-gasto-monto');
   if (campoDinero) formatearInputDineroEnVivo(campoDinero);
 });
 
@@ -1108,6 +1402,28 @@ elTablaHonorariosBody.addEventListener('click', (evento) => {
   const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
   if (botonMarcarDeudaPagada) {
     marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));
+    return;
+  }
+
+  const botonOtrosGastos = evento.target.closest('button[data-otros-gastos-id]');
+  if (botonOtrosGastos) {
+    abrirFormularioOtrosGastos(Number(botonOtrosGastos.dataset.otrosGastosId));
+    return;
+  }
+
+  const botonMarcarGastoPagado = evento.target.closest('button[data-marcar-gasto-pagado-id]');
+  if (botonMarcarGastoPagado) {
+    const gastoId = Number(botonMarcarGastoPagado.dataset.marcarGastoPagadoId);
+    const gasto = otrosGastosCache.find((g) => g.id === gastoId);
+    const filaGasto = evento.target.closest('li[data-fila-gasto-id]');
+    if (gasto && filaGasto) filaGasto.innerHTML = construirSubformularioMarcarGastoPagadoHtml(gasto);
+    return;
+  }
+
+  const botonCancelarMarcarGasto = evento.target.closest('[data-cancelar-marcar-gasto]');
+  if (botonCancelarMarcarGasto) {
+    const filaExpandible = evento.target.closest('tr.fila-expandible');
+    if (filaExpandible) abrirFormularioOtrosGastos(Number(filaExpandible.dataset.expandibleId));
     return;
   }
 
@@ -1151,6 +1467,20 @@ elTablaHonorariosBody.addEventListener('submit', async (evento) => {
   if (formDeuda) {
     evento.preventDefault();
     await guardarDeudaCongeladaInline(formDeuda);
+    return;
+  }
+
+  const formNuevoGasto = evento.target.closest('form.form-nuevo-gasto-inline');
+  if (formNuevoGasto) {
+    evento.preventDefault();
+    await guardarGastoNuevoInline(formNuevoGasto);
+    return;
+  }
+
+  const formMarcarGastoPagado = evento.target.closest('form.form-marcar-gasto-pagado-inline');
+  if (formMarcarGastoPagado) {
+    evento.preventDefault();
+    await guardarGastoPagadoInline(formMarcarGastoPagado);
   }
 });
 
@@ -1356,229 +1686,6 @@ function generarFichaPago(cliente, honorario) {
   elFichaImprimir.innerHTML = html;
   window.print();
 }
-
-// --- Importar / Exportar Excel --------------------------------------------
-//
-// La cuota mensual/anual pactada YA NO se importa desde acá -- se sacó el
-// botón "Importar Cuotas desde Excel" que existía antes: ahora esas dos
-// columnas se cargan junto con el resto de los datos del cliente en el
-// importador de Clientes (ver importarClientesDesdeExcel en js/clientes.js).
-// Acá solo queda el importador del historial de pagos, más un exportador
-// único con dos hojas (Honorarios + Historial de Pagos, ver
-// exportarHonorariosAExcel). El bloque de resumen
-// (#honorarios-importar-resumen) sigue existiendo por si en el futuro se
-// suma otro importador a esta pantalla.
-
-function mostrarResumenImportacionHonorarios(titulo, resumenTexto, filasSalteadas) {
-  elImportarResumenHonorariosTitulo.textContent = titulo;
-  elImportarResumenHonorariosTexto.textContent =
-    resumenTexto + (filasSalteadas.length > 0 ? ` ${filasSalteadas.length} fila(s) salteada(s) (detalle abajo).` : '');
-  elImportarResumenHonorariosDetalle.innerHTML = filasSalteadas
-    .map((item) => `<li>Fila ${item.fila}: ${escaparHtmlHonorarios(item.motivo)}</li>`)
-    .join('');
-  elImportarResumenHonorarios.classList.remove('oculto');
-}
-
-// Acepta una celda de fecha ya convertida a Date por SheetJS (cellDates:
-// true, ver excel-utils.js) o texto en "yyyy-mm-dd"/"dd/mm/yyyy". Devuelve
-// la fecha en formato ISO (yyyy-mm-dd) o null si no se pudo interpretar.
-function parsearFechaDeCeldaHonorarios(valor) {
-  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
-    return formatearFechaISO(valor);
-  }
-
-  const texto = celdaTexto(valor);
-  if (!texto) return null;
-
-  let coincidencia = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (coincidencia) {
-    const [, anio, mes, dia] = coincidencia;
-    return formatearFechaISO(new Date(Number(anio), Number(mes) - 1, Number(dia)));
-  }
-
-  coincidencia = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (coincidencia) {
-    const [, dia, mes, anio] = coincidencia;
-    return formatearFechaISO(new Date(Number(anio), Number(mes) - 1, Number(dia)));
-  }
-
-  return null;
-}
-
-// --- Importar Historial de Pagos -------------------------------------------
-//
-// Columnas esperadas: "RUC", "Corresponde a" (Mensual/Anual), "Monto",
-// "Período - Mes" (1-12, solo obligatorio si Corresponde a = Mensual),
-// "Período - Año", "Forma de Pago" (Efectivo/Transferencia/Cheque), "N°
-// de Recibo" (opcional) y "Fecha de Pago". Cada fila válida hace un
-// INSERT en `pagos_honorarios` -- son pagos históricos, no se intenta
-// detectar duplicados (confirmado: reimportar el mismo archivo duplica
-// los pagos, aceptable para una carga inicial). Si el RUC no existe en
-// `clientes`, la fila se saltea con "cliente no encontrado".
-async function importarPagosDesdeExcel(archivo) {
-  if (!supabaseHonorarios) return;
-
-  elBtnImportarPagos.disabled = true;
-  elImportarResumenHonorarios.classList.add('oculto');
-
-  try {
-    const filas = await leerFilasDeArchivoExcel(archivo);
-
-    const { data: clientes, error: errorClientes } = await supabaseHonorarios.from('clientes').select('id, ruc');
-    if (errorClientes) throw errorClientes;
-
-    const idPorRuc = new Map((clientes || []).map((c) => [c.ruc.trim(), c.id]));
-
-    let insertados = 0;
-    const filasSalteadas = [];
-
-    for (let i = 0; i < filas.length; i += 1) {
-      const numeroFila = i + 2;
-      const fila = filas[i];
-
-      try {
-        const ruc = celdaTexto(fila['RUC']);
-        if (!ruc) throw new Error('RUC vacío.');
-
-        const clienteId = idPorRuc.get(ruc);
-        if (!clienteId) throw new Error('cliente no encontrado');
-
-        const correspondeA = celdaTexto(fila['Corresponde a']).toLowerCase();
-        const tipo = correspondeA.startsWith('mensual') ? 'mensual' : correspondeA.startsWith('anual') ? 'anual' : null;
-        if (!tipo) throw new Error('"Corresponde a" debe ser "Mensual" o "Anual".');
-
-        const monto = celdaNumero(fila['Monto']);
-        if (monto === null || monto <= 0) throw new Error('Monto inválido.');
-
-        const anio = celdaNumero(fila['Período - Año']);
-        if (anio === null) throw new Error('Período - Año es obligatorio.');
-
-        let periodoIso;
-        if (tipo === 'mensual') {
-          const mes = celdaNumero(fila['Período - Mes']);
-          if (mes === null || mes < 1 || mes > 12) {
-            throw new Error('Período - Mes debe estar entre 1 y 12 para la cuota mensual.');
-          }
-          periodoIso = formatearFechaISO(new Date(anio, mes - 1, 1));
-        } else {
-          periodoIso = formatearFechaISO(new Date(anio, 0, 1));
-        }
-
-        const formaPagoTexto = celdaTexto(fila['Forma de Pago']).toLowerCase();
-        const formaPago = ['efectivo', 'transferencia', 'cheque'].includes(formaPagoTexto) ? formaPagoTexto : null;
-        if (!formaPago) throw new Error('Forma de Pago debe ser Efectivo, Transferencia o Cheque.');
-
-        const numeroRecibo = celdaTexto(fila['N° de Recibo']) || null;
-
-        const fechaPago = parsearFechaDeCeldaHonorarios(fila['Fecha de Pago']);
-        if (!fechaPago) throw new Error('Fecha de Pago inválida (se espera dd/mm/aaaa o una fecha de Excel).');
-
-        const { error } = await supabaseHonorarios.from('pagos_honorarios').insert({
-          cliente_id: clienteId,
-          tipo_honorario: tipo,
-          monto_pagado: monto,
-          forma_pago: formaPago,
-          numero_recibo: numeroRecibo,
-          fecha_pago: fechaPago,
-          periodo: periodoIso,
-        });
-        if (error) throw error;
-
-        insertados += 1;
-      } catch (errorFila) {
-        console.error(`Error al importar la fila ${numeroFila} del Excel de pagos:`, errorFila);
-        filasSalteadas.push({ fila: numeroFila, motivo: errorFila.message || 'Error desconocido.' });
-      }
-    }
-
-    mostrarResumenImportacionHonorarios(
-      'Importar Historial de Pagos',
-      `Importación de Historial de Pagos terminada: ${insertados} pago(s) registrado(s).`,
-      filasSalteadas
-    );
-
-    if (insertados > 0) await cargarHonorarios();
-  } catch (error) {
-    console.error('Error al importar pagos desde Excel:', error);
-    if (error instanceof ErrorLibreriaExcelNoDisponible) {
-      mostrarMensajeHonorarios(error.message, 'error');
-    } else {
-      mostrarMensajeHonorarios('No se pudo leer el archivo. Verificá que sea un .xlsx con el formato esperado.', 'error');
-    }
-  } finally {
-    elBtnImportarPagos.disabled = false;
-    elInputImportarPagos.value = '';
-  }
-}
-
-if (elBtnImportarPagos && elInputImportarPagos) {
-  elBtnImportarPagos.addEventListener('click', () => elInputImportarPagos.click());
-  elInputImportarPagos.addEventListener('change', () => {
-    const archivo = elInputImportarPagos.files[0];
-    if (archivo) importarPagosDesdeExcel(archivo);
-  });
-}
-
-// --- Exportar Honorarios a Excel --------------------------------------------
-//
-// Descarga TODOS los clientes (sin aplicar el filtro de cartera ni el
-// buscador de esta pantalla, mismo criterio que la exportación de
-// Clientes) en dos hojas: "Honorarios" (RUC, Razón Social, Cuota Mensual,
-// Cuota Anual, Estado) e "Historial de Pagos" (mismas columnas que espera
-// importarPagosDesdeExcel, más RUC/Razón Social) -- de forma que el
-// archivo exportado sirva de respaldo completo y de plantilla para
-// reimportar. Reutiliza clientesCacheHonorarios/honorariosCache/pagosCache
-// ya cargados por cargarHonorarios(), sin pedir datos nuevos.
-async function exportarHonorariosAExcel() {
-  if (!supabaseHonorarios) return;
-
-  elBtnExportarHonorarios.disabled = true;
-  try {
-    const filasHonorarios = clientesCacheHonorarios.map((cliente) => {
-      const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
-      const resultado = calcularEstadoHonorario(honorario, cliente);
-      return {
-        'RUC': cliente.ruc,
-        'Razón Social': cliente.razon_social,
-        'Cuota Mensual': honorario?.monto_mensual ?? '',
-        'Cuota Anual': honorario?.monto_anual ?? '',
-        'Estado': resultado ? (resultado.estado === 'al_dia' ? 'Al día' : 'Debe') : 'Sin configurar',
-      };
-    });
-
-    const filasPagos = pagosCache.map((pago) => {
-      const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
-      const [anioPeriodo, mesPeriodo] = pago.periodo.split('-');
-      return {
-        'RUC': cliente?.ruc ?? '',
-        'Razón Social': cliente?.razon_social ?? 'Cliente eliminado',
-        'Corresponde a': pago.tipo_honorario === 'mensual' ? 'Mensual' : 'Anual',
-        'Monto': Number(pago.monto_pagado),
-        'Período - Mes': pago.tipo_honorario === 'mensual' ? Number(mesPeriodo) : '',
-        'Período - Año': Number(anioPeriodo),
-        'Forma de Pago': formatearFormaPago(pago.forma_pago),
-        'N° de Recibo': pago.numero_recibo ?? '',
-        'Fecha de Pago': pago.fecha_pago,
-      };
-    });
-
-    await descargarComoExcel(`honorarios_${new Date().toISOString().slice(0, 10)}.xlsx`, [
-      { nombre: 'Honorarios', filas: filasHonorarios },
-      { nombre: 'Historial de Pagos', filas: filasPagos },
-    ]);
-  } catch (error) {
-    console.error('Error al exportar honorarios a Excel:', error);
-    if (error instanceof ErrorLibreriaExcelNoDisponible) {
-      mostrarMensajeHonorarios(error.message, 'error');
-    } else {
-      mostrarMensajeHonorarios('No se pudo exportar el Excel de honorarios.', 'error');
-    }
-  } finally {
-    elBtnExportarHonorarios.disabled = false;
-  }
-}
-
-if (elBtnExportarHonorarios) elBtnExportarHonorarios.addEventListener('click', exportarHonorariosAExcel);
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda
 // volver a llamarla cada vez que se entra a esta pestaña.

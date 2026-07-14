@@ -261,22 +261,6 @@ input[type='search'] {
   cursor: pointer;
 }
 
-/* Grupo de botones de Importar/Exportar Excel (hoy usado en Honorarios):
-   mismo ancho/alto y separación pareja entre sí en vez del tamaño dispar
-   que salía de dejar que cada botón se ajustara solo al largo de su
-   texto, más el margin-left de .boton-secundario sumándose al gap. */
-.grupo-botones-excel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.grupo-botones-excel .boton {
-  min-width: 230px;
-  min-height: 38px;
-  margin-left: 0;
-}
-
 .grupo-vencimiento {
   margin-bottom: 24px;
 }
@@ -384,6 +368,22 @@ input[type='search'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Presentaciones: tabla compacta con una columna por obligación (Fase 5).
+   Reutiliza el mismo toggle de celda que Historial (.celda-historial-*);
+   acá solo se ajusta el padding, igual que hace .tabla-historial-mensual
+   arriba, para que el <label> interno no quede con doble relleno. */
+.tabla-presentaciones td.celda-historial {
+  padding: 0;
+}
+
+/* Celda de una obligación que el cliente no tiene asignada: no aplica, así
+   que no lleva checkbox -- solo un guion centrado y en gris para que se
+   note de un vistazo que no hay nada que marcar ahí. */
+.celda-obligacion-na {
+  text-align: center;
+  color: var(--color-texto-secundario);
 }
 
 .fila-form {
@@ -514,106 +514,10 @@ input[type='search'] {
   cursor: pointer;
 }
 
-/* Presentaciones: un bloque por cliente (en vez de una fila de tabla), con
-   su lista de obligaciones pendientes debajo -- cada cliente puede tener
-   una cantidad distinta de obligaciones pendientes, así que una tabla de
-   columnas fijas no alcanza. */
-.lista-clientes-presentaciones {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.cliente-presentacion {
-  border: 1px solid var(--color-borde);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.cliente-presentacion-encabezado {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.cliente-presentacion-numero {
-  color: var(--color-texto-secundario);
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 20px;
-}
-
-.cliente-presentacion-datos {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cliente-presentacion-datos .boton-link {
-  font-size: 15px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.cliente-presentacion-detalle {
-  font-size: 13px;
-  color: var(--color-texto-secundario);
-}
-
-.lista-obligaciones-pendientes {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.obligacion-pendiente {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  background-color: var(--color-chico-fondo);
-  border-radius: 6px;
-  flex-wrap: wrap;
-}
-
-.obligacion-pendiente-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.obligacion-pendiente-nombre {
-  color: var(--color-chico-texto);
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.obligacion-pendiente-fecha {
-  font-size: 12px;
-  color: var(--color-texto-secundario);
-}
-
-.obligacion-pendiente-check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-texto);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.obligacion-pendiente-check input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
+/* Presentaciones dejó de armar un bloque por cliente con checkboxes
+   apilados: ahora es una tabla de verdad (.tabla-clientes.tabla-presentaciones,
+   ver más abajo la regla ".tabla-presentaciones td.celda-historial") con una
+   columna por obligación, así que ya no hace falta este layout de bloques. */
 
 .badge {
   padding: 3px 10px;
@@ -657,6 +561,78 @@ input[type='search'] {
 .tarjeta-login {
   width: 100%;
   max-width: 360px;
+}
+
+.login-instruccion {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: var(--color-texto-secundario);
+}
+
+/* Paso 1 del login ("elegí tu nombre", ver js/auth.js): un botón grande
+   por perfil, apilados, en vez de un <select> -- son pocos nombres (el
+   estudio entero) y así cada uno se toca directo sin abrir nada. */
+.login-nombres-contenedor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.login-nombre-boton {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--color-borde);
+  background-color: var(--color-superficie);
+  color: var(--color-texto);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.login-nombre-boton:hover {
+  border-color: var(--color-marca);
+  background-color: var(--color-chico-fondo);
+}
+
+/* Paso 2 (contraseña): botón "Volver" chico arriba del todo del form,
+   separado de las acciones de abajo para que quede claro que no envía
+   nada -- solo vuelve al paso 1. */
+.boton-login-volver {
+  display: block;
+  margin-bottom: 14px;
+}
+
+/* Input de contraseña + botón "Ver"/"Ocultar" en la misma fila, sin sumar
+   una fila-form aparte solo para el botón. */
+.input-con-boton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-con-boton input {
+  flex: 1;
+}
+
+.boton-ver-password {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.fila-checkbox label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.fila-checkbox input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
 }
 
 .barra-usuario {

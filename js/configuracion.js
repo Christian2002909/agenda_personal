@@ -356,13 +356,17 @@ if (elFormMiPerfil) {
     try {
       const { data: sesionData, error: errorSesion } = await supabaseConfiguracion.auth.getSession();
       const usuarioId = sesionData?.session?.user?.id;
+      const usuarioEmail = sesionData?.session?.user?.email || null;
       if (errorSesion || !usuarioId) {
         throw new Error('No se pudo leer tu sesión actual.');
       }
 
+      // Guardamos también el email (columna agregada en schema.sql, sección
+      // 15) para que la vista pública `perfiles_publicos` pueda mostrarlo en
+      // la pantalla de login sin sesión -- ver js/auth.js.
       const { error: errorPerfil } = await supabaseConfiguracion
         .from('perfiles')
-        .insert({ id: usuarioId, nombre, rol: 'responsable' });
+        .insert({ id: usuarioId, nombre, rol: 'responsable', email: usuarioEmail });
 
       if (errorPerfil) throw errorPerfil;
 
@@ -474,13 +478,16 @@ if (elFormCrearResponsable) {
         return;
       }
 
-      // 4) Insertamos el perfil (nombre visible + rol por defecto). Recién
-      // acá existe la fila que el resto de la app usa para listar
+      // 4) Insertamos el perfil (nombre visible + rol por defecto + email).
+      // Recién acá existe la fila que el resto de la app usa para listar
       // responsables (ver policy "perfiles_insertar_autenticados" en
-      // schema.sql).
+      // schema.sql). El email se guarda también en `perfiles` (no solo en
+      // auth.users) porque la pantalla de login necesita mostrarlo/usarlo
+      // ANTES de que exista sesión, vía la vista pública
+      // `perfiles_publicos` -- ver schema.sql sección 15.2 y js/auth.js.
       const { error: errorPerfil } = await supabaseConfiguracion
         .from('perfiles')
-        .insert({ id: usuarioNuevoId, nombre, rol: 'responsable' });
+        .insert({ id: usuarioNuevoId, nombre, rol: 'responsable', email });
 
       if (errorPerfil) throw errorPerfil;
 

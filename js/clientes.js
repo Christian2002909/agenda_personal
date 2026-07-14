@@ -17,6 +17,7 @@
 // resuelve Node los require() dentro de un <script> cargado en la ventana.
 const supabase = require('./js/supabaseClient.js');
 const { leerFilasDeArchivoExcel, descargarComoExcel, celdaEsAfirmativa, celdaTexto, celdaNumero, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
+const { formatearFechaISO } = require('./js/calendario-logica.js');
 const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
 
 // --- Referencias a elementos del HTML -----------------------------------
@@ -469,23 +470,78 @@ elForm.addEventListener('submit', async (evento) => {
   }
 });
 
+// Acepta una celda de fecha ya convertida a Date por exceljs (ver
+// celdaValorPlano en excel-utils.js) o texto en "yyyy-mm-dd"/"dd/mm/yyyy".
+// Devuelve la fecha en formato ISO (yyyy-mm-dd) o null si no se pudo
+// interpretar -- usada para "Deuda Congelada - Fecha de Acuerdo" y "Otros
+// Gastos - Fecha" de la Hoja "Honorarios" (ver importarClientesDesdeExcel
+// más abajo). Mismo criterio que usaba js/honorarios.js para sus propias
+// columnas de fecha antes de que se le sacaran los botones de Excel.
+function parsearFechaDeCeldaCliente(valor) {
+  if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
+    return formatearFechaISO(valor);
+  }
+
+  const texto = celdaTexto(valor);
+  if (!texto) return null;
+
+  let coincidencia = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (coincidencia) {
+    const [, anio, mes, dia] = coincidencia;
+    return formatearFechaISO(new Date(Number(anio), Number(mes) - 1, Number(dia)));
+  }
+
+  coincidencia = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (coincidencia) {
+    const [, dia, mes, anio] = coincidencia;
+    return formatearFechaISO(new Date(Number(anio), Number(mes) - 1, Number(dia)));
+  }
+
+  return null;
+}
+
 // --- Importar clientes desde Excel ------------------------------------------
 //
-// Columnas esperadas (ver también exportarClientesAExcel, que genera un
-// archivo con este mismo formato para usar de plantilla): "RUC", "Razón
-// Social", "Terminación RUC", "Clave Marangatu", "Cierre Fiscal (mes)",
-// "Cuota Mensual", "Cuota Anual", y una columna más por cada obligación del
-// catálogo (nombre exacto de obligaciones.nombre, ej. "IVA", "RG 90
-// Mensual") con "Sí"/"No" (o vacía = No) indicando si el cliente la tiene
-// asignada.
+// El archivo trae DOS hojas (ver también exportarClientesAExcel/
+// descargarPlantillaClientesExcel, que generan un archivo con este mismo
+// formato para usar de plantilla):
 //
-// Por fila: si el RUC ya existe (comparación exacta) se ACTUALIZA ese
-// cliente; si no existe, se crea. cliente_obligaciones se sincroniza con
-// el mismo patrón "borrar todo y reinsertar" que ya usa el formulario
-// manual de arriba. Cada fila se procesa en su propio try/catch para que
-// un dato inválido en una fila no trabe la importación de las demás --
-// al final se muestra cuántas se crearon/actualizaron y el detalle de las
-// que se saltearon, con el número de fila del Excel y el motivo.
+// - Hoja "Clientes": SOLO datos básicos + obligaciones asignadas -- "RUC",
+//   "Razón Social", "Terminación RUC", "Clave Marangatu", "Cierre Fiscal
+//   (mes)", y una columna más por cada obligación del catálogo (nombre
+//   exacto de obligaciones.nombre, ej. "IVA", "RG 90 Mensual") con "Sí"/
+//   "No" (o vacía = No) indicando si el cliente la tiene asignada. NO lleva
+//   columnas de cuota/honorarios -- eso se mudó a la otra hoja.
+// - Hoja "Honorarios": todo lo financiero por cliente -- "RUC" y "Razón
+//   Social" (para poder cruzarla con la Hoja "Clientes", ya que exceljs
+//   arma cada hoja como una lista plana de filas sin ninguna relación
+//   automática entre ellas), "Cuota Mensual", "Cuota Anual", "Deuda
+//   Congelada - Tipo" (Mensual/Anual), "Deuda Congelada - Monto", "Deuda
+//   Congelada - Fecha de Acuerdo", "Otros Gastos - Descripción", "Otros
+//   Gastos - Monto", "Otros Gastos - Fecha". Es UNA fila por cliente (no
+//   una lista de movimientos): si un cliente tiene más de una deuda
+//   congelada o más de un otro gasto para cargar, solo el primero entra
+//   por esta vía -- el resto se carga a mano desde Honorarios
+//   (js/honorarios.js), que es donde se gestionan día a día de cualquier
+//   forma.
+//
+// El cruce entre hojas es por RUC exacto. Una fila de la Hoja "Honorarios"
+// cuyo RUC no aparece en la Hoja "Clientes" de este mismo archivo se
+// ignora (no alcanza para crear un cliente por sí sola: le faltan datos
+// obligatorios como Razón Social completa/Terminación RUC/Cierre Fiscal
+// que solo trae la Hoja "Clientes"). Si el archivo no tiene una hoja
+// "Honorarios" (por ejemplo, un .xlsx viejo de una sola hoja), simplemente
+// no se toca ningún dato financiero -- mismo criterio de "no informado, no
+// tocar" que ya usaba esta función antes de separar las hojas.
+//
+// Por fila de la Hoja "Clientes": si el RUC ya existe (comparación exacta)
+// se ACTUALIZA ese cliente; si no existe, se crea. cliente_obligaciones se
+// sincroniza con el mismo patrón "borrar todo y reinsertar" que ya usa el
+// formulario manual de arriba. Cada fila se procesa en su propio try/catch
+// (incluyendo lo que le corresponda de la Hoja "Honorarios") para que un
+// dato inválido en una fila no trabe la importación de las demás -- al
+// final se muestra cuántas se crearon/actualizaron y el detalle de las que
+// se saltearon, con el número de fila del Excel y el motivo.
 //
 // Responsable: la planilla NO trae esta columna (se maneja aparte, por el
 // sistema de usuarios -- ver docs/PEDIDOS_PENDIENTES.md, "Cartera por
@@ -497,17 +553,27 @@ elForm.addEventListener('submit', async (evento) => {
 // responsable/responsable_id actual -- el import solo pisa los campos que
 // realmente vienen en el Excel.
 //
-// Cuota Mensual / Cuota Anual: si la fila trae alguna de las dos, se hace
-// upsert sobre `honorarios` (onConflict cliente_id) -- mismo patrón que ya
-// usa el botón "Editar cuota" de Honorarios (js/honorarios.js,
-// guardarCuotaInline). Si el Excel NO trae esas columnas (o vienen vacías
-// para ese cliente), el honorario existente del cliente NO se toca -- a
-// diferencia del formulario manual de arriba (que si guarda con un campo
-// en blanco, lo interpreta como "sacar esa cuota"), acá una columna vacía
-// significa "no informado", no "borrar". Por eso no se puede resolver con
-// el mismo upsert de dos columnas a secas: si el cliente ya tenía honorario
+// Cuota Mensual / Cuota Anual: si la fila de Honorarios trae alguna de las
+// dos, se hace upsert sobre `honorarios` (onConflict cliente_id) -- mismo
+// patrón que ya usa el botón "Editar cuota" de Honorarios (js/honorarios.js,
+// guardarCuotaInline). Si esa columna viene vacía para ese cliente, el
+// honorario existente del cliente NO se toca -- a diferencia del
+// formulario manual de arriba (que si guarda con un campo en blanco, lo
+// interpreta como "sacar esa cuota"), acá una columna vacía significa "no
+// informado", no "borrar". Por eso no se puede resolver con el mismo
+// upsert de dos columnas a secas: si el cliente ya tenía honorario
 // configurado, se completa el valor no informado con el que ya tenía antes
 // de hacer el upsert (ver honorarioPorCliente más abajo).
+//
+// Deuda Congelada / Otros Gastos: a diferencia de la cuota (que es un
+// upsert -- "el valor vigente es este"), estos dos son cargos puntuales,
+// así que cada fila con datos válidos genera un INSERT nuevo en
+// deudas_congeladas_honorarios/otros_gastos_honorarios -- no se intenta
+// detectar duplicados, mismo criterio que ya usaban los importadores que
+// existían antes en Honorarios para estos mismos datos (reimportar el
+// mismo archivo los duplica, aceptable para una carga inicial). Quedan
+// pendientes (pagada/pagado = false) recién creados, igual que si se
+// hubieran cargado a mano desde Honorarios.
 async function importarClientesDesdeExcel(archivo) {
   if (!supabase) return;
 
@@ -515,7 +581,21 @@ async function importarClientesDesdeExcel(archivo) {
   elImportarResumen.classList.add('oculto');
 
   try {
-    const filas = await leerFilasDeArchivoExcel(archivo);
+    const [filas, filasHonorarios] = await Promise.all([
+      leerFilasDeArchivoExcel(archivo, 'Clientes'),
+      leerFilasDeArchivoExcel(archivo, 'Honorarios'),
+    ]);
+
+    // RUC -> fila de la Hoja "Honorarios", para cruzarla con cada fila de
+    // la Hoja "Clientes" que se procesa más abajo. Si el archivo no tenía
+    // hoja "Honorarios", filasHonorarios ya viene vacío (ver
+    // leerFilasDeArchivoExcel en excel-utils.js), así que este Map también
+    // queda vacío y ningún cliente toca sus datos financieros.
+    const filaHonorarioPorRuc = new Map(
+      filasHonorarios
+        .map((fh) => [celdaTexto(fh['RUC']), fh])
+        .filter(([ruc]) => ruc)
+    );
 
     // Por si se importa antes de que termine de cargar el catálogo (no
     // debería pasar en la práctica, ya que el botón vive en la misma
@@ -580,10 +660,14 @@ async function importarClientesDesdeExcel(archivo) {
 
         const claveMarangatu = celdaTexto(fila['Clave Marangatu']) || null;
 
-        const montoMensualExcel = celdaNumero(fila['Cuota Mensual']);
-        const montoAnualExcel = celdaNumero(fila['Cuota Anual']);
-        if (montoMensualExcel !== null && montoMensualExcel <= 0) throw new Error('Cuota Mensual debe ser mayor a 0.');
-        if (montoAnualExcel !== null && montoAnualExcel <= 0) throw new Error('Cuota Anual debe ser mayor a 0.');
+        // Datos financieros de este cliente, si vienen en la Hoja
+        // "Honorarios" (ver filaHonorarioPorRuc más arriba).
+        const filaHonorario = filaHonorarioPorRuc.get(ruc);
+
+        const montoMensualExcel = filaHonorario ? celdaNumero(filaHonorario['Cuota Mensual']) : null;
+        const montoAnualExcel = filaHonorario ? celdaNumero(filaHonorario['Cuota Anual']) : null;
+        if (montoMensualExcel !== null && montoMensualExcel <= 0) throw new Error('Hoja "Honorarios": Cuota Mensual debe ser mayor a 0.');
+        if (montoAnualExcel !== null && montoAnualExcel <= 0) throw new Error('Hoja "Honorarios": Cuota Anual debe ser mayor a 0.');
 
         const obligacionesSeleccionadas = obligacionesCache
           .filter((obligacion) => celdaEsAfirmativa(fila[obligacion.nombre]))
@@ -658,6 +742,64 @@ async function importarClientesDesdeExcel(archivo) {
           if (errorHonorario) throw errorHonorario;
           honorarioPorCliente.set(clienteId, { monto_mensual: montoMensualFinal, monto_anual: montoAnualFinal });
         }
+
+        // Deuda Congelada: solo si la Hoja "Honorarios" trae un Monto para
+        // este cliente -- a diferencia de la cuota, esto SIEMPRE inserta
+        // una fila nueva en deudas_congeladas_honorarios (ver comentario
+        // grande de arriba de esta función).
+        if (filaHonorario) {
+          const deudaMonto = celdaNumero(filaHonorario['Deuda Congelada - Monto']);
+          if (deudaMonto !== null) {
+            if (deudaMonto <= 0) throw new Error('Hoja "Honorarios": Deuda Congelada - Monto debe ser mayor a 0.');
+
+            const deudaTipoTexto = celdaTexto(filaHonorario['Deuda Congelada - Tipo']).toLowerCase();
+            const deudaTipo = deudaTipoTexto.startsWith('mensual') ? 'mensual' : deudaTipoTexto.startsWith('anual') ? 'anual' : null;
+            if (!deudaTipo) {
+              throw new Error('Hoja "Honorarios": Deuda Congelada - Tipo debe ser "Mensual" o "Anual" cuando hay un Monto cargado.');
+            }
+
+            const deudaFechaAcuerdo = parsearFechaDeCeldaCliente(filaHonorario['Deuda Congelada - Fecha de Acuerdo']);
+            if (!deudaFechaAcuerdo) {
+              throw new Error('Hoja "Honorarios": Deuda Congelada - Fecha de Acuerdo inválida (se espera dd/mm/aaaa o una fecha de Excel).');
+            }
+
+            const { error: errorDeuda } = await supabase.from('deudas_congeladas_honorarios').insert({
+              cliente_id: clienteId,
+              tipo_honorario: deudaTipo,
+              monto: deudaMonto,
+              fecha_acuerdo: deudaFechaAcuerdo,
+            });
+            if (errorDeuda) throw errorDeuda;
+          }
+
+          // Otros Gastos: mismo criterio que Deuda Congelada -- solo si la
+          // fila trae Descripción o Monto, SIEMPRE inserta un cargo nuevo
+          // en otros_gastos_honorarios (queda pendiente, igual que si se
+          // hubiera cargado a mano desde Honorarios).
+          const gastoDescripcion = celdaTexto(filaHonorario['Otros Gastos - Descripción']);
+          const gastoMontoExcel = celdaNumero(filaHonorario['Otros Gastos - Monto']);
+          if (gastoDescripcion || gastoMontoExcel !== null) {
+            if (!gastoDescripcion) {
+              throw new Error('Hoja "Honorarios": Otros Gastos - Descripción es obligatoria cuando hay un Monto cargado.');
+            }
+            if (gastoMontoExcel === null || gastoMontoExcel <= 0) {
+              throw new Error('Hoja "Honorarios": Otros Gastos - Monto debe ser mayor a 0.');
+            }
+
+            const gastoFecha = parsearFechaDeCeldaCliente(filaHonorario['Otros Gastos - Fecha']);
+            if (!gastoFecha) {
+              throw new Error('Hoja "Honorarios": Otros Gastos - Fecha inválida (se espera dd/mm/aaaa o una fecha de Excel).');
+            }
+
+            const { error: errorGasto } = await supabase.from('otros_gastos_honorarios').insert({
+              cliente_id: clienteId,
+              descripcion: gastoDescripcion,
+              monto: gastoMontoExcel,
+              fecha_cargo: gastoFecha,
+            });
+            if (errorGasto) throw errorGasto;
+          }
+        }
       } catch (errorFila) {
         console.error(`Error al importar la fila ${numeroFila} del Excel de clientes:`, errorFila);
         filasSalteadas.push({
@@ -708,11 +850,19 @@ if (elBtnImportarClientes && elInputImportarClientes) {
 // --- Exportar clientes a Excel ------------------------------------------
 //
 // Descarga TODOS los clientes del sistema (no hay ningún filtro en esta
-// pantalla) con las mismas columnas que espera importarClientesDesdeExcel,
-// para que el archivo exportado sirva de plantilla de referencia. El
-// catálogo de obligaciones se usa completo (sin filtrar por el panel "RG
-// 90 visible" de Configuración): la exportación es un respaldo de datos
-// crudos, no una vista de la interfaz.
+// pantalla) en dos hojas ("Clientes" y "Honorarios"), con las mismas
+// columnas que espera importarClientesDesdeExcel, para que el archivo
+// exportado sirva de plantilla de referencia. El catálogo de obligaciones
+// se usa completo (sin filtrar por el panel "RG 90 visible" de
+// Configuración): la exportación es un respaldo de datos crudos, no una
+// vista de la interfaz.
+//
+// La Hoja "Honorarios" es una fila por cliente (ver comentario grande de
+// importarClientesDesdeExcel): si un cliente tiene más de una deuda
+// congelada pendiente o más de un otro gasto pendiente, esta exportación
+// solo incluye el más reciente de cada uno -- el resto sigue viéndose
+// completo desde la pantalla Honorarios (js/honorarios.js), que no tiene
+// esta limitación porque no depende de una fila plana por cliente.
 async function exportarClientesAExcel() {
   if (!supabase) return;
 
@@ -722,16 +872,37 @@ async function exportarClientesAExcel() {
       { data: clientes, error: errorClientes },
       { data: clienteObligaciones, error: errorClienteObligaciones },
       { data: honorarios, error: errorHonorarios },
+      { data: deudasCongeladas, error: errorDeudasCongeladas },
+      { data: otrosGastos, error: errorOtrosGastos },
     ] = await Promise.all([
       supabase.from('clientes').select('*').order('razon_social'),
       supabase.from('cliente_obligaciones').select('cliente_id, obligacion_id'),
       supabase.from('honorarios').select('cliente_id, monto_mensual, monto_anual'),
+      supabase.from('deudas_congeladas_honorarios').select('*').eq('pagada', false),
+      supabase.from('otros_gastos_honorarios').select('*').eq('pagado', false),
     ]);
     if (errorClientes) throw errorClientes;
     if (errorClienteObligaciones) throw errorClienteObligaciones;
     if (errorHonorarios) throw errorHonorarios;
+    if (errorDeudasCongeladas) throw errorDeudasCongeladas;
+    if (errorOtrosGastos) throw errorOtrosGastos;
 
     const honorarioPorCliente = new Map((honorarios || []).map((h) => [h.cliente_id, h]));
+
+    // Solo la más reciente (por created_at) de cada tabla queda por
+    // cliente -- ver comentario grande de arriba de esta función.
+    const masRecientePorCliente = (filas) => {
+      const mapa = new Map();
+      for (const fila of filas || []) {
+        const actual = mapa.get(fila.cliente_id);
+        if (!actual || new Date(fila.created_at) > new Date(actual.created_at)) {
+          mapa.set(fila.cliente_id, fila);
+        }
+      }
+      return mapa;
+    };
+    const deudaCongeladaPorCliente = masRecientePorCliente(deudasCongeladas);
+    const otroGastoPorCliente = masRecientePorCliente(otrosGastos);
 
     let catalogoObligaciones = obligacionesCache;
     if (catalogoObligaciones.length === 0) {
@@ -746,17 +917,14 @@ async function exportarClientesAExcel() {
       obligacionesPorCliente.get(fila.cliente_id).add(fila.obligacion_id);
     }
 
-    const filasExcel = (clientes || []).map((cliente) => {
+    const filasClientes = (clientes || []).map((cliente) => {
       const asignadas = obligacionesPorCliente.get(cliente.id) || new Set();
-      const honorario = honorarioPorCliente.get(cliente.id);
       const filaExcel = {
         'RUC': cliente.ruc,
         'Razón Social': cliente.razon_social,
         'Terminación RUC': cliente.terminacion_ruc ?? '',
         'Clave Marangatu': cliente.clave_marangatu ?? '',
         'Cierre Fiscal (mes)': cliente.cierre_fiscal_mes ?? '',
-        'Cuota Mensual': honorario?.monto_mensual ?? '',
-        'Cuota Anual': honorario?.monto_anual ?? '',
       };
       for (const obligacion of catalogoObligaciones) {
         filaExcel[obligacion.nombre] = asignadas.has(obligacion.id) ? 'Sí' : 'No';
@@ -764,8 +932,27 @@ async function exportarClientesAExcel() {
       return filaExcel;
     });
 
+    const filasHonorarios = (clientes || []).map((cliente) => {
+      const honorario = honorarioPorCliente.get(cliente.id);
+      const deudaCongelada = deudaCongeladaPorCliente.get(cliente.id);
+      const otroGasto = otroGastoPorCliente.get(cliente.id);
+      return {
+        'RUC': cliente.ruc,
+        'Razón Social': cliente.razon_social,
+        'Cuota Mensual': honorario?.monto_mensual ?? '',
+        'Cuota Anual': honorario?.monto_anual ?? '',
+        'Deuda Congelada - Tipo': deudaCongelada ? (deudaCongelada.tipo_honorario === 'mensual' ? 'Mensual' : 'Anual') : '',
+        'Deuda Congelada - Monto': deudaCongelada?.monto ?? '',
+        'Deuda Congelada - Fecha de Acuerdo': deudaCongelada?.fecha_acuerdo ?? '',
+        'Otros Gastos - Descripción': otroGasto?.descripcion ?? '',
+        'Otros Gastos - Monto': otroGasto?.monto ?? '',
+        'Otros Gastos - Fecha': otroGasto?.fecha_cargo ?? '',
+      };
+    });
+
     await descargarComoExcel(`clientes_${new Date().toISOString().slice(0, 10)}.xlsx`, [
-      { nombre: 'Clientes', filas: filasExcel },
+      { nombre: 'Clientes', filas: filasClientes },
+      { nombre: 'Honorarios', filas: filasHonorarios },
     ]);
   } catch (error) {
     console.error('Error al exportar clientes a Excel:', error);
@@ -780,6 +967,108 @@ async function exportarClientesAExcel() {
 }
 
 if (elBtnExportarClientes) elBtnExportarClientes.addEventListener('click', exportarClientesAExcel);
+
+// --- Plantilla de Excel descargable (modelo vacío/de ejemplo) --------------
+//
+// A diferencia de exportarClientesAExcel (que descarga los clientes REALES
+// ya cargados, útil de referencia pero no siempre disponible/representativo),
+// esta plantilla es un .xlsx con las mismas 2 hojas y columnas exactas que
+// espera importarClientesDesdeExcel -- ver el comentario grande arriba de
+// esa función -- más un par de clientes de EJEMPLO con datos ficticios
+// genéricos (ningún dato real del estudio), LOS MISMOS en las dos hojas
+// (mismo RUC/Razón Social) para que quede claro cómo se cruzan entre sí:
+// cómo se escribe el RUC, que Cierre Fiscal (mes) solo admite 4/6/12, cómo
+// se marcan las obligaciones con "Sí"/"No" (incluyendo al menos una
+// obligación en "Sí" y otra en "No" en la misma fila), y cómo se completan
+// Cuota/Deuda Congelada/Otros Gastos en la Hoja "Honorarios" -- un cliente
+// de ejemplo con las tres cosas cargadas y otro sin ninguna, para que
+// quede claro que son todas opcionales.
+const elBtnPlantillaClientes = document.getElementById('btn-plantilla-clientes-excel');
+
+async function descargarPlantillaClientesExcel() {
+  if (elBtnPlantillaClientes) elBtnPlantillaClientes.disabled = true;
+  try {
+    // Igual que exportarClientesAExcel: si el catálogo todavía no se cargó
+    // (importa/exportá apenas se abre la pantalla), se pide directo.
+    let catalogoObligaciones = obligacionesCache;
+    if (catalogoObligaciones.length === 0) {
+      const { data, error } = await supabase.from('obligaciones').select('*').order('id');
+      if (error) throw error;
+      catalogoObligaciones = data || [];
+    }
+
+    // Arma una fila de ejemplo de la Hoja "Clientes", marcando "Sí" en la
+    // obligación de índice "indiceObligacionSi" del catálogo (y "No" en el
+    // resto) -- así cada fila de ejemplo queda con al menos un "Sí" y un
+    // "No" entre sus columnas de obligación, sin depender de cuántas tenga
+    // el catálogo.
+    function filaClienteEjemplo(ruc, razonSocial, terminacionRuc, claveMarangatu, cierreFiscalMes, indiceObligacionSi) {
+      const fila = {
+        'RUC': ruc,
+        'Razón Social': razonSocial,
+        'Terminación RUC': terminacionRuc,
+        'Clave Marangatu': claveMarangatu,
+        'Cierre Fiscal (mes)': cierreFiscalMes,
+      };
+      catalogoObligaciones.forEach((obligacion, indice) => {
+        fila[obligacion.nombre] = indice === indiceObligacionSi ? 'Sí' : 'No';
+      });
+      return fila;
+    }
+
+    const filasClientes = [
+      filaClienteEjemplo('80012345-6', 'Ejemplo S.A.', 6, 'clave-marangatu-ejemplo', 12, 0),
+      filaClienteEjemplo('80099876-1', 'Comercial Modelo S.R.L.', 1, '', 12, Math.min(1, catalogoObligaciones.length - 1)),
+    ];
+
+    // Mismo RUC/Razón Social que las filas de arriba, para que se vea
+    // cómo se cruzan las dos hojas. "Ejemplo S.A." trae las tres cosas
+    // cargadas (cuota, deuda congelada y un otro gasto); "Comercial Modelo
+    // S.R.L." no trae ninguna, para dejar claro que todo es opcional.
+    const filasHonorarios = [
+      {
+        'RUC': '80012345-6',
+        'Razón Social': 'Ejemplo S.A.',
+        'Cuota Mensual': 500000,
+        'Cuota Anual': 600000,
+        'Deuda Congelada - Tipo': 'Mensual',
+        'Deuda Congelada - Monto': 1500000,
+        'Deuda Congelada - Fecha de Acuerdo': '20/12/2026',
+        'Otros Gastos - Descripción': 'Trámite de habilitación municipal',
+        'Otros Gastos - Monto': 150000,
+        'Otros Gastos - Fecha': '10/03/2026',
+      },
+      {
+        'RUC': '80099876-1',
+        'Razón Social': 'Comercial Modelo S.R.L.',
+        'Cuota Mensual': 350000,
+        'Cuota Anual': '',
+        'Deuda Congelada - Tipo': '',
+        'Deuda Congelada - Monto': '',
+        'Deuda Congelada - Fecha de Acuerdo': '',
+        'Otros Gastos - Descripción': '',
+        'Otros Gastos - Monto': '',
+        'Otros Gastos - Fecha': '',
+      },
+    ];
+
+    await descargarComoExcel('plantilla_clientes.xlsx', [
+      { nombre: 'Clientes', filas: filasClientes },
+      { nombre: 'Honorarios', filas: filasHonorarios },
+    ]);
+  } catch (error) {
+    console.error('Error al descargar la plantilla de Clientes:', error);
+    if (error instanceof ErrorLibreriaExcelNoDisponible) {
+      mostrarMensaje(error.message, 'error', true);
+    } else {
+      mostrarMensaje('No se pudo generar la plantilla de Excel.', 'error');
+    }
+  } finally {
+    if (elBtnPlantillaClientes) elBtnPlantillaClientes.disabled = false;
+  }
+}
+
+if (elBtnPlantillaClientes) elBtnPlantillaClientes.addEventListener('click', descargarPlantillaClientesExcel);
 
 // --- Editar un cliente desde otra pantalla (Presentaciones) -----------------
 
