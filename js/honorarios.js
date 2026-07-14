@@ -713,9 +713,9 @@ function dibujarTablaHonorarios() {
         ${celdasMeses.join('')}
         ${celdaAnual}
         <td class="celda-acciones-honorarios">
-          <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
           <select class="selector-acciones-honorarios" data-acciones-cliente-id="${cliente.id}">
             <option value="" selected>Acciones ▾</option>
+            <option value="ficha" ${honorario ? '' : 'disabled'}>Ficha</option>
             <option value="editar-cuota">Editar cuota</option>
             <option value="detalle">Detalle</option>
             <option value="deuda-congelada" ${honorario ? '' : 'disabled'}>Deuda congelada</option>
@@ -736,7 +736,7 @@ function dibujarTablaHonorarios() {
       filaExpandible.innerHTML = `
         <td colspan="${HONORARIOS_COLSPAN}">
           <div class="fila-expandible-grid">
-            <div class="fila-expandible-contenido"></div>
+            <div class="fila-expandible-contenido"><div class="fila-expandible-interior"></div></div>
           </div>
         </td>
       `;
@@ -803,7 +803,7 @@ function sincronizarCheckboxGrilla(casilla) {
 function cerrarTodasLasFilasExpandibles() {
   elTablaHonorariosBody.querySelectorAll('tr.fila-expandible .fila-expandible-grid.abierta').forEach((grid) => {
     grid.classList.remove('abierta');
-    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
+    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-interior').innerHTML = ''; }, { once: true });
   });
   elTablaHonorariosBody.querySelectorAll('input.checkbox-grilla-honorarios').forEach(sincronizarCheckboxGrilla);
 }
@@ -813,7 +813,7 @@ function cerrarFilaExpandible(clienteId) {
   const grid = fila?.querySelector('.fila-expandible-grid');
   if (grid) {
     grid.classList.remove('abierta');
-    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
+    grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-interior').innerHTML = ''; }, { once: true });
   }
   elTablaHonorariosBody
     .querySelectorAll(`input.checkbox-grilla-honorarios[data-cliente-id="${clienteId}"]`)
@@ -829,7 +829,7 @@ function abrirFilaExpandible(clienteId, html) {
   const fila = elTablaHonorariosBody.querySelector(`tr.fila-expandible[data-expandible-id="${clienteId}"]`);
   const grid = fila?.querySelector('.fila-expandible-grid');
   if (!grid) return;
-  grid.querySelector('.fila-expandible-contenido').innerHTML = html;
+  grid.querySelector('.fila-expandible-interior').innerHTML = html;
   // requestAnimationFrame para asegurar que el navegador ya pintó el
   // estado "cerrado" (0fr) antes de pasar a "abierta" -- si se agregara la
   // clase en el mismo tick que se llenó el contenido, algunos navegadores
@@ -1502,18 +1502,22 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
     return;
   }
 
-  // Desplegable "Acciones" de la columna de la tabla (reemplaza a los 4
-  // botones sueltos "Editar cuota"/"Detalle"/"Deuda congelada"/"Otros
-  // Gastos" que tenía antes, para que la columna quede más limpia). Cada
-  // elección dispara la misma función que disparaba su botón equivalente,
-  // y el selector vuelve solo al placeholder "Acciones ▾" después.
+  // Desplegable "Acciones" de la columna de la tabla (incluye "Ficha",
+  // reemplaza al botón suelto que tenía antes, para que la columna quede
+  // más angosta). Cada elección dispara la misma función que disparaba su
+  // botón/opción equivalente, y el selector vuelve solo al placeholder
+  // "Acciones ▾" después.
   const selectorAcciones = evento.target.closest('select[data-acciones-cliente-id]');
   if (selectorAcciones) {
     const clienteId = Number(selectorAcciones.dataset.accionesClienteId);
     const accion = selectorAcciones.value;
     selectorAcciones.value = '';
 
-    if (accion === 'editar-cuota') abrirFormularioEditarCuota(clienteId);
+    if (accion === 'ficha') {
+      const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
+      const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
+      if (cliente && honorario) generarFichaPago(cliente, honorario);
+    } else if (accion === 'editar-cuota') abrirFormularioEditarCuota(clienteId);
     else if (accion === 'detalle') abrirDetalleCliente(clienteId);
     else if (accion === 'deuda-congelada') abrirFormularioCongelarDeuda(clienteId);
     else if (accion === 'otros-gastos') abrirFormularioOtrosGastos(clienteId);
@@ -1543,15 +1547,6 @@ elTablaHonorariosBody.addEventListener('input', (evento) => {
 });
 
 elTablaHonorariosBody.addEventListener('click', (evento) => {
-  const botonFicha = evento.target.closest('button[data-ficha-cliente-id]');
-  if (botonFicha) {
-    const clienteId = Number(botonFicha.dataset.fichaClienteId);
-    const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
-    const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
-    if (cliente && honorario) generarFichaPago(cliente, honorario);
-    return;
-  }
-
   const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
   if (botonMarcarDeudaPagada) {
     marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));

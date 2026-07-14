@@ -285,6 +285,20 @@ input[type='search'] {
   text-transform: uppercase;
 }
 
+/* Grilla mensual de Honorarios: 15 columnas (Cliente + 12 meses + Anual +
+   Acciones) piden bastante más compacidad que una tabla común de 4-6
+   columnas -- padding más angosto en general, y font-size un toque menor
+   en los encabezados de mes para que "Ene"/"Feb"/etc. no impongan un ancho
+   mínimo de columna más grande del necesario. */
+table.tabla-honorarios-grilla th,
+table.tabla-honorarios-grilla td {
+  padding: 6px 6px;
+}
+
+table.tabla-honorarios-grilla th {
+  font-size: 11px;
+}
+
 /* Mismo título "VENCIMIENTO N - FECHA D" que .grupo-vencimiento-titulo,
    pero como <td colspan> dentro de la tabla de Honorarios (esa es un
    <table>, no permite un <div> de encabezado suelto como Presentaciones). */
@@ -305,11 +319,16 @@ input[type='search'] {
    el cobro + botón de balance (Debe/Al día) para registrar el pago en sí,
    uno al lado del otro (no dentro del mismo <label>, para que clickear el
    balance no tilde/destilde el checkbox de al lado). */
+.tabla-clientes td.celda-anual-honorarios {
+  padding: 6px 8px;
+}
+
 .celda-anual-fila {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .celda-anual-fila input[type='checkbox'] {
@@ -629,39 +648,32 @@ input[type='search'] {
   font-weight: 600;
 }
 
-.celda-checkbox {
+/* Celdas de un solo checkbox de la grilla mensual de Honorarios (12
+   columnas Ene-Dic) -- padding bien angosto a propósito, ya que con 12
+   columnas repetidas el padding normal de .tabla-clientes td (10px 8px)
+   hacía la tabla mucho más ancha de lo necesario para lo que en realidad
+   es solo un checkbox por celda. */
+.tabla-clientes td.celda-checkbox {
   text-align: center;
+  padding: 6px 4px;
 }
 
 .celda-checkbox input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
 }
 
-/* Columna "Acciones" de Honorarios: antes eran 5 botones sueltos que se
-   envolvían en 2 líneas por fila (muy cargado); ahora "Ficha" (la acción
-   más usada, genera el PDF) queda como botón aparte, y las otras 4
-   (Editar cuota/Detalle/Deuda congelada/Otros Gastos) se agrupan en un
-   único <select> "Acciones ▾" que vuelve solo al placeholder después de
-   cada elección (ver el listener de "change" en js/honorarios.js). */
-/* "Ficha" y el desplegable "Acciones" apilados en columna, con el mismo
-   ancho fijo -- antes cada uno tomaba el ancho de su propio contenido
-   ("Ficha" angosto, "Acciones ▾" más ancho) y quedaban desparejos. */
+/* Columna "Acciones" de Honorarios: un único <select> "Acciones ▾" con
+   Ficha/Editar cuota/Detalle/Deuda congelada/Otros Gastos, que vuelve solo
+   al placeholder después de cada elección (ver el listener de "change" en
+   js/honorarios.js) -- todo lo que antes eran hasta 5 botones sueltos. */
 .celda-acciones-honorarios {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  width: 150px;
-}
-
-.celda-acciones-honorarios .boton-chico {
-  padding: 5px 8px;
-  text-align: center;
+  width: 120px;
 }
 
 .selector-acciones-honorarios {
+  width: 100%;
   padding: 5px 8px;
   font-size: 13px;
   border-radius: 6px;
@@ -862,7 +874,11 @@ input[type='search'] {
    puede transicionar suave incluso cuando no se conoce el alto final del
    contenido de antemano). .fila-expandible-contenido necesita
    overflow:hidden para que el grid pueda colapsarlo a 0 real en vez de
-   quedarse en su alto mínimo de contenido. */
+   quedarse en su alto mínimo de contenido -- y el padding NO puede vivir en
+   ESE mismo elemento (el padding es parte de la caja, overflow:hidden no lo
+   recorta, así que con grid-template-rows en 0fr igual quedaba un
+   resto visible del alto del padding); vive en .fila-expandible-interior,
+   un nivel más adentro, para que sí quede contenido "recortable". */
 .fila-expandible td {
   background-color: var(--color-fondo);
   padding: 0;
@@ -885,6 +901,9 @@ input[type='search'] {
 
 .fila-expandible-contenido {
   overflow: hidden;
+}
+
+.fila-expandible-interior {
   padding: 16px;
 }
 
