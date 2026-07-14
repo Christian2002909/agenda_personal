@@ -122,8 +122,11 @@
            además permite abrir un cliente acá para editarlo. -->
 
       <!-- Importar/exportar la cartera completa de clientes en Excel
-           (.xlsx). El importador actualiza por RUC exacto si el cliente ya
-           existe, o crea uno nuevo si no -- ver js/clientes.js. -->
+           (.xlsx), en 2 hojas: "Clientes" (datos básicos + obligaciones) y
+           "Honorarios" (cuota mensual/anual, deuda congelada y otros
+           gastos), cruzadas por RUC. El importador actualiza por RUC
+           exacto si el cliente ya existe, o crea uno nuevo si no -- ver
+           js/clientes.js. -->
       <section class="tarjeta">
         <h2>Importar / Exportar Clientes (Excel)</h2>
         <div class="acciones-form">
@@ -289,39 +292,6 @@
     <section id="vista-honorarios" class="vista oculto">
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
-
-      <!-- Importar/exportar en Excel (.xlsx): la cuota mensual/anual ahora
-           se importa junto con el Excel de Clientes (ver js/clientes.js) --
-           acá solo queda el importador del historial de pagos y el
-           exportador con dos hojas (Honorarios + Historial de Pagos), ver
-           js/honorarios.js. -->
-      <section class="tarjeta">
-        <h2>Importar / Exportar Honorarios (Excel)</h2>
-        <div class="acciones-form grupo-botones-excel">
-          <button type="button" id="btn-importar-pagos-excel" class="boton boton-secundario">Importar Historial de Pagos desde Excel</button>
-          <input type="file" id="input-importar-pagos-excel" accept=".xlsx" class="oculto" />
-          <button type="button" id="btn-plantilla-pagos-excel" class="boton boton-secundario">Descargar Plantilla de Pagos</button>
-          <button type="button" id="btn-exportar-honorarios-excel" class="boton boton-secundario">Exportar a Excel</button>
-        </div>
-        <!-- "Otros Gastos" también se puede importar desde Excel, pero a
-             diferencia de los botones de arriba (siempre visibles) queda
-             escondido detrás de este desplegable colapsado por defecto --
-             es una categoría nueva y poco usada todavía, no amerita un
-             botón grande permanente junto a los dos de uso habitual. -->
-        <details class="mas-opciones-excel">
-          <summary>Más opciones</summary>
-          <div class="acciones-form">
-            <button type="button" id="btn-importar-gastos-excel" class="boton boton-secundario">Importar Otros Gastos desde Excel</button>
-            <input type="file" id="input-importar-gastos-excel" accept=".xlsx" class="oculto" />
-            <button type="button" id="btn-plantilla-gastos-excel" class="boton boton-secundario">Descargar Plantilla de Otros Gastos</button>
-          </div>
-        </details>
-        <div id="honorarios-importar-resumen" class="resumen-importacion oculto">
-          <p id="honorarios-importar-resumen-titulo" class="fila-form-titulo"></p>
-          <p id="honorarios-importar-resumen-texto"></p>
-          <ul id="honorarios-importar-resumen-detalle" class="lista-resumen-importacion"></ul>
-        </div>
-      </section>
 
       <!-- Honorario pactado por cliente. Registrar un pago, editar la cuota
            pactada y ver el detalle de un cliente se hacen todos desde acá,

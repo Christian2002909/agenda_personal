@@ -1,9 +1,11 @@
 // js/excel-utils.js
 // -----------------------------------------------------------------------
 // Funciones puras/compartidas para importar y exportar archivos .xlsx con
-// la librería `exceljs`. Las usan js/clientes.js (importar/exportar
-// Clientes) y js/honorarios.js (importar cuotas/pagos, exportar
-// Honorarios).
+// la librería `exceljs`. La usa únicamente js/clientes.js, para
+// importar/exportar la cartera de Clientes en un libro de 2 hojas
+// ("Clientes" con los datos básicos + obligaciones, "Honorarios" con lo
+// financiero por cliente) -- js/honorarios.js es una pantalla 100% manual,
+// sin ningún botón de Excel.
 //
 // Se usa `exceljs` en vez de `xlsx` (SheetJS) a propósito: la versión de
 // `xlsx` publicada en el registro de npm tiene dos vulnerabilidades de
@@ -94,27 +96,44 @@ function celdaValorPlano(valor) {
 
 // Lee un archivo .xlsx (el File que entrega un <input type="file">) y
 // devuelve una Promise que resuelve a un array de objetos, uno por fila,
-// usando la primera fila de la primera hoja como encabezados (columnas).
+// usando la primera fila de la hoja elegida como encabezados (columnas).
 // Las celdas vacías quedan como string vacío en vez de no aparecer en el
 // objeto (más simple de validar fila por fila). Las filas completamente
 // vacías se saltean.
-async function leerFilasDeArchivoExcel(archivo) {
+//
+// `hoja` identifica QUÉ hoja leer del libro, y es opcional -- si no se
+// pasa, se sigue leyendo la primera hoja (índice 0), igual que antes de
+// que existiera este parámetro, así que cualquier llamador viejo sigue
+// funcionando sin cambios. Acepta:
+//   - un número: índice 0-based dentro de `libro.worksheets` (mismo orden
+//     en que se agregaron las hojas al workbook, ej. 0 = primera, 1 =
+//     segunda).
+//   - un string: nombre exacto de la hoja (el que se le puso con
+//     `addWorksheet` al generar el archivo, ej. "Clientes" u
+//     "Honorarios"), resuelto con `libro.getWorksheet(nombre)`. Útil
+//     cuando un mismo archivo trae varias hojas y no se puede asumir su
+//     orden (ej. si alguien reordenó las hojas a mano en Excel).
+// Si la hoja pedida no existe (número fuera de rango, o ningún nombre
+// coincide), devuelve un array vacío en vez de tirar error -- mismo
+// criterio que ya tenía esta función cuando el archivo no tenía ninguna
+// hoja.
+async function leerFilasDeArchivoExcel(archivo, hoja = 0) {
   exigirExcelJS();
   const buffer = await archivo.arrayBuffer();
   const libro = new ExcelJS.Workbook();
   await libro.xlsx.load(buffer);
 
-  const hoja = libro.worksheets[0];
-  if (!hoja) return [];
+  const hojaExcel = typeof hoja === 'string' ? libro.getWorksheet(hoja) : libro.worksheets[hoja];
+  if (!hojaExcel) return [];
 
   const encabezados = [];
-  hoja.getRow(1).eachCell({ includeEmpty: true }, (celda, numeroColumna) => {
+  hojaExcel.getRow(1).eachCell({ includeEmpty: true }, (celda, numeroColumna) => {
     encabezados[numeroColumna] = celdaValorPlano(celda.value);
   });
 
   const filas = [];
-  for (let numeroFila = 2; numeroFila <= hoja.rowCount; numeroFila++) {
-    const fila = hoja.getRow(numeroFila);
+  for (let numeroFila = 2; numeroFila <= hojaExcel.rowCount; numeroFila++) {
+    const fila = hojaExcel.getRow(numeroFila);
     if (fila.cellCount === 0) continue;
 
     const objetoFila = {};
