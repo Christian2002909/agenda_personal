@@ -872,7 +872,13 @@ table.tabla-honorarios-grilla th {
    recorta, así que con grid-template-rows en 0fr igual quedaba un
    resto visible del alto del padding); vive en .fila-expandible-interior,
    un nivel más adentro, para que sí quede contenido "recortable". */
-.fila-expandible td {
+/* table.tabla-honorarios-grilla th, td (más arriba en este archivo) tiene
+   especificidad elemento+clase+elemento (0,1,2), más que ".fila-expandible
+   td" a secas (0,1,1) -- le ganaba sin importar el orden en el archivo,
+   dejando 6px de padding arriba/abajo en la fila "cerrada" (0fr) como una
+   franja vacía entre cada cliente. "tr." prefijado sube la especificidad
+   a (0,1,2) para empatar y ganar por venir después en el archivo. */
+tr.fila-expandible td {
   background-color: var(--color-fondo);
   padding: 0;
   /* Sin esto, el borde inferior que .tabla-clientes td pone por defecto se
