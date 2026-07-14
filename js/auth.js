@@ -44,6 +44,25 @@ const elBtnVerPassword = document.getElementById('btn-ver-password');
 const elLoginRecordar = document.getElementById('login-recordar');
 const elBtnOlvideContrasena = document.getElementById('btn-olvide-contrasena');
 
+// Ícono de "ojo" (mostrar) / "ojo tachado" (ocultar) del botón de
+// contraseña -- SVG inline en vez de un ícono de fuente externa, mismo
+// criterio que el resto de la app (sin dependencias de red para algo
+// puramente visual).
+const ICONO_OJO_MOSTRAR =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" /></svg>';
+const ICONO_OJO_OCULTAR =
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.3 20.3 0 0 1 5.06-5.94M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 7 11 7a20.3 20.3 0 0 1-3.22 4.31M14.12 14.12a3 3 0 1 1-4.24-4.24" />' +
+  '<line x1="1" y1="1" x2="23" y2="23" /></svg>';
+
+function restablecerBotonVerPassword() {
+  if (!elBtnVerPassword) return;
+  elBtnVerPassword.innerHTML = ICONO_OJO_MOSTRAR;
+  elBtnVerPassword.setAttribute('aria-label', 'Mostrar contraseña');
+  elBtnVerPassword.setAttribute('title', 'Mostrar contraseña');
+}
+
 const elBtnLogout = document.getElementById('btn-logout');
 const elUsuarioActual = document.getElementById('usuario-actual');
 const elBannerSinPerfil = document.getElementById('banner-sin-perfil');
@@ -109,7 +128,7 @@ function mostrarPasoNombres() {
   elFormLogin.reset();
   elLoginRecordar.checked = true;
   elLoginPassword.type = 'password';
-  elBtnVerPassword.textContent = 'Ver';
+  restablecerBotonVerPassword();
   elListaNombres.classList.remove('oculto');
   cargarListaNombres();
 }
@@ -197,7 +216,7 @@ function mostrarPasoContrasena(perfil) {
   elFormLogin.reset();
   elLoginRecordar.checked = true;
   elLoginPassword.type = 'password';
-  elBtnVerPassword.textContent = 'Ver';
+  restablecerBotonVerPassword();
 
   if (perfil) {
     elNombreElegido.textContent = `Hola, ${perfil.nombre}`;
@@ -245,7 +264,13 @@ if (!supabaseAuth) {
     elBtnVerPassword.addEventListener('click', () => {
       const mostrando = elLoginPassword.type === 'text';
       elLoginPassword.type = mostrando ? 'password' : 'text';
-      elBtnVerPassword.textContent = mostrando ? 'Ver' : 'Ocultar';
+      if (mostrando) {
+        restablecerBotonVerPassword();
+      } else {
+        elBtnVerPassword.innerHTML = ICONO_OJO_OCULTAR;
+        elBtnVerPassword.setAttribute('aria-label', 'Ocultar contraseña');
+        elBtnVerPassword.setAttribute('title', 'Ocultar contraseña');
+      }
     });
   }
 

@@ -137,18 +137,25 @@ async function cargarPerfiles() {
 // Arma las opciones "Yo" / cada perfil / "Todos". Si ya había una selección
 // (por ejemplo, se volvió a esta pestaña), la respetamos; si es la primera
 // vez que se arma el selector, arranca en "Yo" (confirmado por el usuario).
+// La opción "Yo" muestra el nombre real del usuario logueado (si ya tiene
+// perfil) en vez del texto literal "Yo", y ese mismo perfil se excluye del
+// resto de la lista para no mostrarlo dos veces (una como "Yo" y otra con
+// su propio nombre).
 function poblarFiltroCartera() {
   if (!elFiltroCartera) return;
 
   const seleccionActual = elFiltroCartera.value;
   elFiltroCartera.innerHTML = '';
 
+  const perfilPropio = perfilesCache.find((perfil) => perfil.id === usuarioActualId);
+
   const opcionYo = document.createElement('option');
   opcionYo.value = VALOR_CARTERA_YO;
-  opcionYo.textContent = 'Yo';
+  opcionYo.textContent = perfilPropio ? perfilPropio.nombre : 'Yo';
   elFiltroCartera.appendChild(opcionYo);
 
   for (const perfil of perfilesCache) {
+    if (perfil.id === usuarioActualId) continue;
     const opcion = document.createElement('option');
     opcion.value = perfil.id;
     opcion.textContent = perfil.nombre;

@@ -234,18 +234,25 @@ async function cargarPerfiles() {
 // Arma las opciones "Yo" / cada perfil / "Todos". Si ya había una selección
 // (por ejemplo, se volvió a esta pestaña), la respetamos; si es la primera
 // vez que se arma el selector, arranca en "Yo" (confirmado por el usuario).
+// La opción "Yo" muestra el nombre real del usuario logueado (si ya tiene
+// perfil) en vez del texto literal "Yo", y ese mismo perfil se excluye del
+// resto de la lista para no mostrarlo dos veces (una como "Yo" y otra con
+// su propio nombre).
 function poblarFiltroCartera() {
   if (!elFiltroCartera) return;
 
   const seleccionActual = elFiltroCartera.value;
   elFiltroCartera.innerHTML = '';
 
+  const perfilPropio = perfilesCache.find((perfil) => perfil.id === usuarioActualId);
+
   const opcionYo = document.createElement('option');
   opcionYo.value = VALOR_CARTERA_YO;
-  opcionYo.textContent = 'Yo';
+  opcionYo.textContent = perfilPropio ? perfilPropio.nombre : 'Yo';
   elFiltroCartera.appendChild(opcionYo);
 
   for (const perfil of perfilesCache) {
+    if (perfil.id === usuarioActualId) continue;
     const opcion = document.createElement('option');
     opcion.value = perfil.id;
     opcion.textContent = perfil.nombre;
@@ -604,12 +611,15 @@ function dibujarTablaHonorarios() {
       <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
       <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}${badgeOtrosGastos ? `<br />${badgeOtrosGastos}` : ''}</td>
       <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
-      <td>
+      <td class="celda-acciones-honorarios">
         <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
-        <button type="button" class="boton boton-chico" data-editar-cuota-id="${cliente.id}">Editar cuota</button>
-        <button type="button" class="boton boton-chico" data-detalle-cliente-id="${cliente.id}">Detalle</button>
-        <button type="button" class="boton boton-chico" data-congelar-deuda-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Deuda congelada</button>
-        <button type="button" class="boton boton-chico" data-otros-gastos-id="${cliente.id}">Otros Gastos</button>
+        <select class="selector-acciones-honorarios" data-acciones-cliente-id="${cliente.id}">
+          <option value="" selected>Acciones ▾</option>
+          <option value="editar-cuota">Editar cuota</option>
+          <option value="detalle">Detalle</option>
+          <option value="deuda-congelada" ${honorario ? '' : 'disabled'}>Deuda congelada</option>
+          <option value="otros-gastos">Otros Gastos</option>
+        </select>
       </td>
     `;
     elTablaHonorariosBody.appendChild(filaCliente);
@@ -1360,6 +1370,24 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
   const selectTipo = evento.target.closest('.campo-pago-tipo');
   if (selectTipo && selectTipo.tagName === 'SELECT') {
     actualizarCamposSegunTipoInline(selectTipo);
+    return;
+  }
+
+  // Desplegable "Acciones" de la columna de la tabla (reemplaza a los 4
+  // botones sueltos "Editar cuota"/"Detalle"/"Deuda congelada"/"Otros
+  // Gastos" que tenía antes, para que la columna quede más limpia). Cada
+  // elección dispara la misma función que disparaba su botón equivalente,
+  // y el selector vuelve solo al placeholder "Acciones ▾" después.
+  const selectorAcciones = evento.target.closest('select[data-acciones-cliente-id]');
+  if (selectorAcciones) {
+    const clienteId = Number(selectorAcciones.dataset.accionesClienteId);
+    const accion = selectorAcciones.value;
+    selectorAcciones.value = '';
+
+    if (accion === 'editar-cuota') abrirFormularioEditarCuota(clienteId);
+    else if (accion === 'detalle') abrirDetalleCliente(clienteId);
+    else if (accion === 'deuda-congelada') abrirFormularioCongelarDeuda(clienteId);
+    else if (accion === 'otros-gastos') abrirFormularioOtrosGastos(clienteId);
   }
 });
 
@@ -1381,33 +1409,9 @@ elTablaHonorariosBody.addEventListener('click', (evento) => {
     return;
   }
 
-  const botonEditarCuota = evento.target.closest('button[data-editar-cuota-id]');
-  if (botonEditarCuota) {
-    abrirFormularioEditarCuota(Number(botonEditarCuota.dataset.editarCuotaId));
-    return;
-  }
-
-  const botonDetalle = evento.target.closest('button[data-detalle-cliente-id]');
-  if (botonDetalle) {
-    abrirDetalleCliente(Number(botonDetalle.dataset.detalleClienteId));
-    return;
-  }
-
-  const botonCongelarDeuda = evento.target.closest('button[data-congelar-deuda-id]');
-  if (botonCongelarDeuda) {
-    abrirFormularioCongelarDeuda(Number(botonCongelarDeuda.dataset.congelarDeudaId));
-    return;
-  }
-
   const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
   if (botonMarcarDeudaPagada) {
     marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));
-    return;
-  }
-
-  const botonOtrosGastos = evento.target.closest('button[data-otros-gastos-id]');
-  if (botonOtrosGastos) {
-    abrirFormularioOtrosGastos(Number(botonOtrosGastos.dataset.otrosGastosId));
     return;
   }
 
