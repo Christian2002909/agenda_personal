@@ -740,8 +740,8 @@ function dibujarTablaHonorarios() {
       filaCliente.innerHTML = `
         <td>
           <div>${escaparHtmlHonorarios(cliente.razon_social)}</div>
-          ${badgesDeudaCongelada ? `<div>${badgesDeudaCongelada}</div>` : ''}
-          ${badgeOtrosGastos ? `<div>${badgeOtrosGastos}</div>` : ''}
+          ${badgesDeudaCongelada ? `<div><button type="button" class="boton-link" data-deuda-congelada-cliente="${cliente.id}" title="Ver/editar la deuda congelada">${badgesDeudaCongelada}</button></div>` : ''}
+          ${badgeOtrosGastos ? `<div><button type="button" class="boton-link" data-otros-gastos-cliente="${cliente.id}" title="Ver/editar otros gastos">${badgeOtrosGastos}</button></div>` : ''}
         </td>
         ${celdasMeses.join('')}
         ${celdaAnual}
@@ -1628,6 +1628,23 @@ elGruposHonorarios.addEventListener('input', (evento) => {
 });
 
 elGruposHonorarios.addEventListener('click', (evento) => {
+  // Los badges de "Deuda congelada"/"Otros gastos" bajo el nombre del
+  // cliente eran texto plano -- no había forma de tocarlos para
+  // gestionarlos, solo el desplegable "Acciones" (que no siempre está a la
+  // vista en una tabla larga). Ahora el badge en sí es un botón que abre el
+  // mismo panel que su opción equivalente del desplegable.
+  const botonDeudaCongelada = evento.target.closest('button[data-deuda-congelada-cliente]');
+  if (botonDeudaCongelada) {
+    abrirFormularioCongelarDeuda(Number(botonDeudaCongelada.dataset.deudaCongeladaCliente));
+    return;
+  }
+
+  const botonOtrosGastosBadge = evento.target.closest('button[data-otros-gastos-cliente]');
+  if (botonOtrosGastosBadge) {
+    abrirFormularioOtrosGastos(Number(botonOtrosGastosBadge.dataset.otrosGastosCliente));
+    return;
+  }
+
   const botonMarcarDeudaPagada = evento.target.closest('button[data-marcar-deuda-pagada-id]');
   if (botonMarcarDeudaPagada) {
     marcarDeudaCongeladaPagada(Number(botonMarcarDeudaPagada.dataset.marcarDeudaPagadaId));

@@ -488,20 +488,18 @@ table.tabla-honorarios-grilla th {
   flex-wrap: wrap;
 }
 
-/* El aviso flota SOBRE el borde superior de la tabla (ver
-   .presentaciones-area-tabla) en vez de empujarla hacia abajo al
-   aparecer/desaparecer -- la sombra ayuda a leerlo como algo flotante,
-   no como parte del layout normal de la fila. */
-.presentaciones-area-tabla {
-  position: relative;
-}
-
+/* position:fixed (no absolute): tiene que quedar visible sin importar
+   cuánto se haya scrolleado la tabla ni en qué fila de qué grupo se tildó
+   el checkbox -- ancla al viewport, no a la tarjeta, como cualquier toast
+   de "deshacer" (Gmail, etc.). z-index por debajo de .ficha-preview-fondo
+   (100) para que un modal siempre quede por encima. */
 .aviso-deshacer-flotante {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 5;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 40;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .aviso-deshacer-acciones {

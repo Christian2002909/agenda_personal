@@ -100,14 +100,14 @@ let perfilesCache = [];
 let usuarioActualId = null;
 
 // Datos de la última presentación tildada, mientras el aviso de "Deshacer"
-// (5 segundos) sigue abierto -- null si no hay ninguno pendiente. Guarda
+// (10 segundos) sigue abierto -- null si no hay ninguno pendiente. Guarda
 // también el id del setTimeout para poder cancelarlo si se cierra el aviso
 // antes de tiempo (se tocó "Aceptar", se destildó otra celda, cambió un
 // filtro, etc.).
 let avisoDeshacerActual = null;
 
 // Cierra el aviso de "Deshacer" (si estaba abierto) y cancela su cierre
-// automático. Se llama tanto al vencer los 5 segundos como al tocar
+// automático. Se llama tanto al vencer los 10 segundos como al tocar
 // "Aceptar"/"Deshacer", y antes de abrir uno nuevo o cambiar de filtro,
 // para que nunca queden dos avisos referenciando presentaciones distintas.
 function ocultarAvisoDeshacer() {
@@ -116,13 +116,13 @@ function ocultarAvisoDeshacer() {
   if (elAvisoDeshacer) elAvisoDeshacer.classList.add('oculto');
 }
 
-// Abre el aviso de "Deshacer" (5 segundos) para la presentación recién
+// Abre el aviso de "Deshacer" (10 segundos) para la presentación recién
 // tildada. La confirmación en sí ya se guardó en la base -- este aviso solo
 // ofrece una ventana corta para revertirla antes de que la celda pase a
 // mostrar únicamente el texto "Presentado" (ver construirCeldaObligacionHtml).
 function mostrarAvisoDeshacer({ clienteId, obligacionId, periodo }) {
   ocultarAvisoDeshacer();
-  const timeoutId = setTimeout(ocultarAvisoDeshacer, 5000);
+  const timeoutId = setTimeout(ocultarAvisoDeshacer, 10000);
   avisoDeshacerActual = { clienteId, obligacionId, periodo, timeoutId };
   if (elAvisoDeshacer) elAvisoDeshacer.classList.remove('oculto');
 }
@@ -600,7 +600,7 @@ function construirFilaCliente(numero, { cliente, celdas }, columnas) {
 //     vez de una fecha, ya que se confirma a mano.
 //   - Presentado: sin checkbox ni fecha, solo el texto "Presentado" (ver
 //     mostrarAvisoDeshacer -- el checkbox desaparece apenas se tilda, no
-//     recién en la siguiente carga; el aviso de 5 segundos es la única
+//     recién en la siguiente carga; el aviso de 10 segundos es la única
 //     ventana para deshacerlo desde acá, después hay que ir a Historial).
 function construirCeldaObligacionHtml({ clienteId, obligacionId, periodo, presentado, fechaVencimiento }) {
   if (presentado) {
@@ -654,7 +654,7 @@ elGrupos.addEventListener('click', (evento) => {
 // (ver construirCeldaObligacionHtml -- una vez presentada, la celda deja de
 // tener checkbox), así que el único evento posible acá es tildar uno para
 // marcarlo como presentado; desmarcarlo pasa a hacerse por el aviso de
-// "Deshacer" de abajo (5 segundos) o, pasado ese margen, desde Historial.
+// "Deshacer" de abajo (10 segundos) o, pasado ese margen, desde Historial.
 //
 // Usamos "upsert" (misma constraint única cliente_id+obligacion_id+periodo
 // que ya usa asegurarPresentacionesDelPeriodoVigente/Historial) en vez de
@@ -686,7 +686,7 @@ elGrupos.addEventListener('change', async (evento) => {
     // anterior, acá nada desaparece) -- repintamos para reflejar el nuevo
     // estado: la celda ya no tiene checkbox, solo "Presentado" (color de
     // fondo + contador del selector también se actualizan), y abrimos el
-    // aviso de "Deshacer" por 5 segundos.
+    // aviso de "Deshacer" por 10 segundos.
     await dibujarPresentaciones();
     mostrarAvisoDeshacer({ clienteId, obligacionId, periodo });
   } catch (error) {
