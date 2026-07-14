@@ -318,120 +318,120 @@
 
       <div id="honorarios-mensaje" class="mensaje oculto"></div>
 
-      <!-- Honorario pactado por cliente. Registrar un pago, editar la cuota
-           pactada y ver el detalle de un cliente se hacen todos desde acá,
-           expandiendo una fila-formulario debajo de la fila del cliente
-           (misma idea que el checkbox "Presentado" de Presentaciones, pero
-           en vez de guardar al toque, despliega un mini-formulario). -->
+      <!-- Honorario pactado por cliente, agrupado por terminación de RUC
+           ("VENCIMIENTO N - FECHA D", igual que Presentaciones/Historial):
+           una fila por cliente con una columna por mes (checkbox nomás, sin
+           fecha -- la fecha exacta queda solo en la Ficha) + una columna
+           final "Anual" (checkbox que activa/desactiva el cobro + botón de
+           balance que registra el pago en sí). Tildar un mes vacío abre el
+           formulario para cargar ese pago; destildar uno ya pagado abre ESE
+           mismo pago para editarlo (nunca lo borra solo). Arranca
+           colapsada -- "Ver" la despliega (ver data-toggle-seccion en
+           js/honorarios.js). -->
       <section class="tarjeta">
-        <h2>Honorarios por Cliente</h2>
-        <div class="fila-form-filtros-pagos">
-          <div class="fila-form">
-            <label for="honorarios-buscar">Buscar cliente</label>
-            <input type="search" id="honorarios-buscar" placeholder="Nombre o RUC..." />
-          </div>
-          <div class="fila-form">
-            <label for="honorarios-filtro-cartera">Responsable:</label>
-            <select id="honorarios-filtro-cartera">
-              <!-- Las opciones se arman dinámicamente desde js/honorarios.js:
-                   "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
-            </select>
-          </div>
+        <div class="seccion-colapsable-encabezado">
+          <h2>Honorarios por Cliente</h2>
+          <button type="button" class="boton boton-secundario boton-chico" data-toggle-seccion="honorarios-por-cliente">Ver</button>
         </div>
-        <div class="tabla-scroll">
-          <table class="tabla-clientes">
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Cuota Mensual</th>
-                <th>Cuota Anual</th>
-                <th>Estado</th>
-                <th>¿Pagó?</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="tabla-honorarios-body">
-              <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
-            </tbody>
-          </table>
-        </div>
-        <p id="sin-honorarios" class="sin-datos oculto">No hay clientes que coincidan con la búsqueda.</p>
-      </section>
-
-      <!-- Cuota Anual: sección aparte, solo visible desde febrero y solo si
-           el panel "panel_honorarios_cuota_anual" de Configuración > Paneles
-           está activado. js/honorarios.js la oculta el resto del año o si
-           el panel está apagado. La cuota anual NO suma sola al estado "Al
-           día"/"Debe" con el paso del tiempo (a diferencia de la mensual):
-           acá se activa a mano, por cliente, con "Activar cobro anual". -->
-      <section class="tarjeta oculto" id="seccion-honorarios-anual">
-        <h2>Cuota Anual</h2>
-        <div class="tabla-scroll">
-          <table class="tabla-clientes">
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Cuota Anual</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="tabla-honorarios-anual-body">
-              <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
-            </tbody>
-          </table>
+        <div class="seccion-colapsable-grid" id="seccion-colapsable-honorarios-por-cliente">
+          <div class="seccion-colapsable-contenido">
+            <div class="fila-form-filtros-pagos">
+              <div class="fila-form">
+                <label for="honorarios-buscar">Buscar cliente</label>
+                <input type="search" id="honorarios-buscar" placeholder="Nombre o RUC..." />
+              </div>
+              <div class="fila-form">
+                <label for="honorarios-filtro-cartera">Responsable:</label>
+                <select id="honorarios-filtro-cartera">
+                  <!-- Las opciones se arman dinámicamente desde js/honorarios.js:
+                       "Yo", una por cada perfil (tabla perfiles) y "Todos". -->
+                </select>
+              </div>
+            </div>
+            <div class="tabla-scroll">
+              <table class="tabla-clientes">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Ene</th><th>Feb</th><th>Mar</th><th>Abr</th>
+                    <th>May</th><th>Jun</th><th>Jul</th><th>Ago</th>
+                    <th>Set</th><th>Oct</th><th>Nov</th><th>Dic</th>
+                    <th>Anual</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-honorarios-body">
+                  <!-- Los grupos "VENCIMIENTO N - FECHA D" y las filas se arman dinámicamente desde js/honorarios.js -->
+                </tbody>
+              </table>
+            </div>
+            <p id="sin-honorarios" class="sin-datos oculto">No hay clientes que coincidan con la búsqueda.</p>
+          </div>
         </div>
       </section>
 
-      <!-- Historial de pagos -->
+      <!-- Historial de pagos: arranca colapsada, igual que la de arriba.
+           "Descargar Excel"/"Ver PDF" exportan lo que esté FILTRADO por
+           Año/Mes en este momento (ver js/honorarios.js). -->
       <section class="tarjeta">
-        <h2>Historial de Pagos</h2>
-        <div class="fila-form-filtros-pagos">
-          <div class="fila-form">
-            <label for="pagos-filtro-anio">Año</label>
-            <select id="pagos-filtro-anio">
-              <option value="">Todos</option>
-            </select>
-          </div>
-          <div class="fila-form">
-            <label for="pagos-filtro-mes">Mes (cuota mensual)</label>
-            <select id="pagos-filtro-mes">
-              <option value="">Todos</option>
-              <option value="1">Enero</option>
-              <option value="2">Febrero</option>
-              <option value="3">Marzo</option>
-              <option value="4">Abril</option>
-              <option value="5">Mayo</option>
-              <option value="6">Junio</option>
-              <option value="7">Julio</option>
-              <option value="8">Agosto</option>
-              <option value="9">Setiembre</option>
-              <option value="10">Octubre</option>
-              <option value="11">Noviembre</option>
-              <option value="12">Diciembre</option>
-            </select>
+        <div class="seccion-colapsable-encabezado">
+          <h2>Historial de Pagos</h2>
+          <button type="button" class="boton boton-secundario boton-chico" data-toggle-seccion="historial-de-pagos">Ver</button>
+        </div>
+        <div class="seccion-colapsable-grid" id="seccion-colapsable-historial-de-pagos">
+          <div class="seccion-colapsable-contenido">
+            <div class="fila-form-filtros-pagos">
+              <div class="fila-form">
+                <label for="pagos-filtro-anio">Año</label>
+                <select id="pagos-filtro-anio">
+                  <option value="">Todos</option>
+                </select>
+              </div>
+              <div class="fila-form">
+                <label for="pagos-filtro-mes">Mes (cuota mensual)</label>
+                <select id="pagos-filtro-mes">
+                  <option value="">Todos</option>
+                  <option value="1">Enero</option>
+                  <option value="2">Febrero</option>
+                  <option value="3">Marzo</option>
+                  <option value="4">Abril</option>
+                  <option value="5">Mayo</option>
+                  <option value="6">Junio</option>
+                  <option value="7">Julio</option>
+                  <option value="8">Agosto</option>
+                  <option value="9">Setiembre</option>
+                  <option value="10">Octubre</option>
+                  <option value="11">Noviembre</option>
+                  <option value="12">Diciembre</option>
+                </select>
+              </div>
+              <div class="fila-form fila-form-botones">
+                <button type="button" id="btn-historial-pagos-excel" class="boton boton-secundario boton-chico">Descargar Excel</button>
+                <button type="button" id="btn-historial-pagos-pdf" class="boton boton-secundario boton-chico">Ver PDF</button>
+              </div>
+            </div>
+            <div class="tabla-scroll">
+              <table class="tabla-clientes">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Corresponde a</th>
+                    <th>Monto</th>
+                    <th>Forma de Pago</th>
+                    <th>N° Recibo</th>
+                    <th>Fecha de Pago</th>
+                    <th>Período</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-pagos-body">
+                  <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
+                </tbody>
+              </table>
+            </div>
+            <p id="sin-pagos" class="sin-datos oculto">Todavía no se registró ningún pago.</p>
           </div>
         </div>
-        <div class="tabla-scroll">
-          <table class="tabla-clientes">
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Corresponde a</th>
-                <th>Monto</th>
-                <th>Forma de Pago</th>
-                <th>N° Recibo</th>
-                <th>Fecha de Pago</th>
-                <th>Período</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="tabla-pagos-body">
-              <!-- Las filas se agregan dinámicamente desde js/honorarios.js -->
-            </tbody>
-          </table>
-        </div>
-        <p id="sin-pagos" class="sin-datos oculto">Todavía no se registró ningún pago.</p>
       </section>
 
     </section>

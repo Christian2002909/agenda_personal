@@ -62,8 +62,16 @@
 (function () {
 
 const supabaseHonorarios = require('./js/supabaseClient.js');
-const { formatearFechaISO, obtenerPeriodoVigente } = require('./js/calendario-logica.js');
+const { formatearFechaISO, obtenerPeriodoVigente, DIA_POR_TERMINACION_RUC } = require('./js/calendario-logica.js');
 const { formatearConPuntos, quitarPuntos } = require('./js/formato-numeros.js');
+// Solo para exportar Historial de Pagos (ver descargarHistorialPagosExcel más
+// abajo) -- a diferencia de la Ficha (PDF vía window.print()), esto sí
+// necesita exceljs. Ver comentario largo en js/excel-utils.js sobre por qué
+// esta librería nunca debe requerirse sin try/catch a nivel de archivo: acá
+// no aplica porque excel-utils.js ya se protege a sí mismo internamente
+// (ExcelJS queda en null si el require() interno falla, y recién tira un
+// error claro cuando de verdad se llama a descargarComoExcel).
+const { descargarComoExcel, ErrorLibreriaExcelNoDisponible } = require('./js/excel-utils.js');
 
 const elHonorariosMensaje = document.getElementById('honorarios-mensaje');
 const elHonorariosBuscar = document.getElementById('honorarios-buscar');
@@ -72,13 +80,12 @@ const elFiltroCartera = document.getElementById('honorarios-filtro-cartera');
 const elTablaHonorariosBody = document.getElementById('tabla-honorarios-body');
 const elSinHonorarios = document.getElementById('sin-honorarios');
 
-const elSeccionHonorariosAnual = document.getElementById('seccion-honorarios-anual');
-const elTablaHonorariosAnualBody = document.getElementById('tabla-honorarios-anual-body');
-
 const elPagosFiltroAnio = document.getElementById('pagos-filtro-anio');
 const elPagosFiltroMes = document.getElementById('pagos-filtro-mes');
 const elTablaPagosBody = document.getElementById('tabla-pagos-body');
 const elSinPagos = document.getElementById('sin-pagos');
+const elBtnHistorialExcel = document.getElementById('btn-historial-pagos-excel');
+const elBtnHistorialPdf = document.getElementById('btn-historial-pagos-pdf');
 
 const elFichaImprimir = document.getElementById('ficha-pago-imprimir');
 const elFichaContenido = document.getElementById('ficha-pago-contenido');
@@ -194,15 +201,6 @@ function formatearInputDineroEnVivo(elInput) {
   elInput.setSelectionRange(nuevaPosicion, nuevaPosicion);
 }
 
-// Enero es el único mes en que la cuota ANUAL todavía no cuenta como
-// adeudada (regla confirmada por el usuario, ver contarPeriodosAdeudables)
-// y en que la sección de cuota anual permanece oculta -- mismo criterio en
-// los dos lugares, para no mostrar como pendiente algo que todavía no
-// corresponde reclamar.
-function esEnero() {
-  return new Date().getMonth() === 0;
-}
-
 // --- Usuario logueado y catálogo de perfiles, para "Ver cartera de" -------
 
 async function cargarUsuarioActual() {
@@ -272,10 +270,7 @@ function poblarFiltroCartera() {
 }
 
 if (elFiltroCartera) {
-  elFiltroCartera.addEventListener('change', () => {
-    dibujarTablaHonorarios();
-    dibujarSeccionHonorariosAnual();
-  });
+  elFiltroCartera.addEventListener('change', () => dibujarTablaHonorarios());
 }
 
 // Clientes con responsable_id NULL (los que no tenían un match exacto en el
@@ -338,7 +333,7 @@ async function cargarHonorarios() {
     ] = await Promise.all([
       supabaseHonorarios
         .from('clientes')
-        .select('id, razon_social, ruc, cierre_fiscal_mes, membrete_nombre, membrete_direccion, membrete_telefono, responsable_id')
+        .select('id, razon_social, ruc, terminacion_ruc, cierre_fiscal_mes, membrete_nombre, membrete_direccion, membrete_telefono, responsable_id')
         .order('razon_social'),
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
@@ -384,7 +379,6 @@ async function cargarHonorarios() {
     poblarFiltroCartera();
 
     dibujarTablaHonorarios();
-    dibujarSeccionHonorariosAnual();
     poblarFiltroAnioPagos();
     dibujarTablaPagos();
 
@@ -469,8 +463,9 @@ function deudaCongeladaPendienteMasReciente(clienteId, tipoHonorario) {
 // la mensual, NO suma sola con el paso del tiempo -- mientras
 // honorario.anual_habilitado_desde sea null, esta función devuelve 0 para
 // 'anual' sin importar cuánto hace que se configuró. El contador la activa
-// a mano (botón "Activar cobro anual", ver dibujarSeccionHonorariosAnual) el
-// día que corresponde cobrarla, y desde ahí se debe el monto_anual completo
+// a mano (checkbox de la columna "Anual" de la grilla, ver
+// dibujarTablaHonorarios) el día que corresponde cobrarla, y desde ahí se
+// debe el monto_anual completo
 // de una sola vez (no multiplicado por períodos como la mensual), descontado
 // por los pagos anuales registrados DESDE esa activación -- nunca por pagos
 // de un ciclo anterior ya saldado (si no, reactivar el cobro el año que
@@ -585,6 +580,22 @@ function dibujarBadgeOtrosGastos(clienteId) {
   return `<span class="badge badge-neutro" title="Cargos sueltos (no la cuota mensual/anual) todavía no pagados por este cliente">Otros gastos pendientes: ${formatearGuaranies(total)}</span>`;
 }
 
+// Cantidad total de columnas de la tabla principal (Cliente + 12 meses +
+// Anual + Acciones), usada para el colspan de la fila expandible del
+// formulario de pago/edición.
+const HONORARIOS_COLSPAN = 15;
+
+// Grilla mensual (una fila por cliente, una columna por mes + una columna
+// final "Anual") agrupada por terminación de RUC ("VENCIMIENTO N - FECHA
+// D"), mismo criterio que Presentaciones/Historial -- reemplaza a la vieja
+// tabla plana con columnas Cuota Mensual/Cuota Anual/Estado/¿Pagó? y a la
+// sección aparte "Cuota Anual" (ver más abajo: la columna Anual absorbe su
+// checkbox de activación + balance). No se muestra fecha de vencimiento en
+// ninguna celda (confirmado por el usuario) -- eso queda solo en la Ficha.
+//
+// Clientes sin terminación de RUC cargada NO se ocultan (a diferencia de
+// Presentaciones): es información de dinero, esconder un cliente por un
+// dato de RUC incompleto sería peor que mostrarlo en un grupo aparte.
 function dibujarTablaHonorarios() {
   elTablaHonorariosBody.innerHTML = '';
 
@@ -606,106 +617,135 @@ function dibujarTablaHonorarios() {
   }
   elSinHonorarios.classList.add('oculto');
 
+  const anioActual = new Date().getFullYear();
+  const CLAVE_SIN_TERMINACION = 'sin-terminacion';
+
+  const porTerminacion = new Map();
   for (const cliente of clientesFiltrados) {
-    const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
-    const resultado = calcularEstadoHonorario(honorario, cliente);
-    const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
-    const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
+    const clave = cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined
+      ? CLAVE_SIN_TERMINACION
+      : cliente.terminacion_ruc;
+    if (!porTerminacion.has(clave)) porTerminacion.set(clave, []);
+    porTerminacion.get(clave).push(cliente);
+  }
 
-    const filaCliente = document.createElement('tr');
-    filaCliente.innerHTML = `
-      <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
-      <td>${honorario?.monto_mensual ? formatearGuaranies(honorario.monto_mensual) : '—'}</td>
-      <td>${honorario?.monto_anual ? formatearGuaranies(honorario.monto_anual) : '—'}</td>
-      <td>${dibujarBadgeEstado(resultado)}${badgesDeudaCongelada ? `<br />${badgesDeudaCongelada}` : ''}${badgeOtrosGastos ? `<br />${badgeOtrosGastos}` : ''}</td>
-      <td class="celda-checkbox"><input type="checkbox" data-pagar-cliente="${cliente.id}" ${honorario ? '' : 'disabled'} /></td>
-      <td class="celda-acciones-honorarios">
-        <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
-        <select class="selector-acciones-honorarios" data-acciones-cliente-id="${cliente.id}">
-          <option value="" selected>Acciones ▾</option>
-          <option value="editar-cuota">Editar cuota</option>
-          <option value="detalle">Detalle</option>
-          <option value="deuda-congelada" ${honorario ? '' : 'disabled'}>Deuda congelada</option>
-          <option value="otros-gastos">Otros Gastos</option>
-        </select>
-      </td>
-    `;
-    elTablaHonorariosBody.appendChild(filaCliente);
+  const clavesOrdenadas = [...porTerminacion.keys()].sort((a, b) => {
+    if (a === CLAVE_SIN_TERMINACION) return 1;
+    if (b === CLAVE_SIN_TERMINACION) return -1;
+    return a - b;
+  });
 
-    // La fila en sí queda siempre en el flujo normal (nunca con
-    // display:none) -- lo que se anima al abrir/cerrar es el wrapper
-    // ".fila-expandible-grid" de adentro (grid-template-rows 0fr -> 1fr,
-    // ver css/style.css), truco que sí se puede transicionar suave a
-    // diferencia de animar el alto de una <tr>/<td> directamente.
-    const filaExpandible = document.createElement('tr');
-    filaExpandible.className = 'fila-expandible';
-    filaExpandible.dataset.expandibleId = cliente.id;
-    filaExpandible.innerHTML = `
-      <td colspan="6">
-        <div class="fila-expandible-grid">
-          <div class="fila-expandible-contenido"></div>
-        </div>
-      </td>
-    `;
-    elTablaHonorariosBody.appendChild(filaExpandible);
+  for (const clave of clavesOrdenadas) {
+    const clientesDelGrupo = porTerminacion.get(clave)
+      .sort((a, b) => a.razon_social.localeCompare(b.razon_social));
+
+    const filaTitulo = document.createElement('tr');
+    filaTitulo.className = 'fila-titulo-grupo-honorarios';
+    const tituloGrupo = clave === CLAVE_SIN_TERMINACION
+      ? 'SIN TERMINACIÓN DE RUC ASIGNADA'
+      : `VENCIMIENTO ${clave} - FECHA ${DIA_POR_TERMINACION_RUC[clave]}`;
+    filaTitulo.innerHTML = `<td colspan="${HONORARIOS_COLSPAN}" class="celda-titulo-grupo-honorarios">${tituloGrupo}</td>`;
+    elTablaHonorariosBody.appendChild(filaTitulo);
+
+    for (const cliente of clientesDelGrupo) {
+      const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
+      const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
+      const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
+
+      const celdasMeses = [];
+      for (let mes = 1; mes <= 12; mes += 1) {
+        if (!honorario?.monto_mensual) {
+          celdasMeses.push('<td class="celda-obligacion-na">—</td>');
+          continue;
+        }
+        const periodoISO = formatearFechaISO(new Date(anioActual, mes - 1, 1));
+        const pagoDelMes = pagosCache.some(
+          (p) => p.cliente_id === cliente.id && p.tipo_honorario === 'mensual' && p.periodo === periodoISO
+        );
+        celdasMeses.push(`
+          <td class="celda-checkbox">
+            <input
+              type="checkbox"
+              class="checkbox-grilla-honorarios"
+              data-cliente-id="${cliente.id}"
+              data-mes-pago="${mes}"
+              data-anio-pago="${anioActual}"
+              ${pagoDelMes ? 'checked' : ''}
+            />
+          </td>
+        `);
+      }
+
+      // honorario puede ser undefined (cliente sin ninguna cuota
+      // configurada todavía) -- calcularSaldoPorTipo asume que existe, así
+      // que no se lo llama en ese caso (misma guarda que ya usaba
+      // calcularEstadoHonorario para la tabla vieja).
+      const saldoAnual = honorario ? (calcularSaldoPorTipo(honorario, cliente, 'anual') ?? 0) : 0;
+      const estadoAnual = { estado: saldoAnual > 0 ? 'debe' : 'al_dia', saldoPendiente: saldoAnual };
+      const celdaAnual = honorario?.monto_anual
+        ? `
+          <td class="celda-anual-honorarios">
+            <div class="celda-anual-fila">
+              <input
+                type="checkbox"
+                data-anual-checkbox-cliente="${cliente.id}"
+                ${honorario.anual_habilitado_desde ? 'checked' : ''}
+                title="Activar/desactivar el cobro de la cuota anual"
+              />
+              <button
+                type="button"
+                class="boton-link"
+                data-anual-balance-cliente="${cliente.id}"
+                title="Registrar/editar el pago de la cuota anual"
+              >${dibujarBadgeEstado(estadoAnual)}</button>
+            </div>
+          </td>
+        `
+        : '<td class="celda-obligacion-na">—</td>';
+
+      const filaCliente = document.createElement('tr');
+      filaCliente.innerHTML = `
+        <td>
+          <div>${escaparHtmlHonorarios(cliente.razon_social)}</div>
+          ${badgesDeudaCongelada ? `<div>${badgesDeudaCongelada}</div>` : ''}
+          ${badgeOtrosGastos ? `<div>${badgeOtrosGastos}</div>` : ''}
+        </td>
+        ${celdasMeses.join('')}
+        ${celdaAnual}
+        <td class="celda-acciones-honorarios">
+          <button type="button" class="boton boton-chico" data-ficha-cliente-id="${cliente.id}" ${honorario ? '' : 'disabled'}>Ficha</button>
+          <select class="selector-acciones-honorarios" data-acciones-cliente-id="${cliente.id}">
+            <option value="" selected>Acciones ▾</option>
+            <option value="editar-cuota">Editar cuota</option>
+            <option value="detalle">Detalle</option>
+            <option value="deuda-congelada" ${honorario ? '' : 'disabled'}>Deuda congelada</option>
+            <option value="otros-gastos">Otros Gastos</option>
+          </select>
+        </td>
+      `;
+      elTablaHonorariosBody.appendChild(filaCliente);
+
+      // La fila en sí queda siempre en el flujo normal (nunca con
+      // display:none) -- lo que se anima al abrir/cerrar es el wrapper
+      // ".fila-expandible-grid" de adentro (grid-template-rows 0fr -> 1fr,
+      // ver css/style.css), truco que sí se puede transicionar suave a
+      // diferencia de animar el alto de una <tr>/<td> directamente.
+      const filaExpandible = document.createElement('tr');
+      filaExpandible.className = 'fila-expandible';
+      filaExpandible.dataset.expandibleId = cliente.id;
+      filaExpandible.innerHTML = `
+        <td colspan="${HONORARIOS_COLSPAN}">
+          <div class="fila-expandible-grid">
+            <div class="fila-expandible-contenido"></div>
+          </div>
+        </td>
+      `;
+      elTablaHonorariosBody.appendChild(filaExpandible);
+    }
   }
 }
 
 elHonorariosBuscar.addEventListener('input', dibujarTablaHonorarios);
-
-// --- Cuota Anual: sección aparte, solo desde febrero ----------------------
-
-// Solo se muestra si estamos en febrero o después (misma regla de gracia
-// que contarPeriodosAdeudables) Y si el panel "panel_honorarios_cuota_anual"
-// de Configuración > Paneles está activado (se lee configuracion_estudio
-// al cargar la pantalla).
-function dibujarSeccionHonorariosAnual() {
-  if (!elSeccionHonorariosAnual || !elTablaHonorariosAnualBody) return;
-
-  const panelActivo = configuracionEstudio?.panel_honorarios_cuota_anual ?? true;
-
-  if (esEnero() || !panelActivo) {
-    elSeccionHonorariosAnual.classList.add('oculto');
-    return;
-  }
-
-  elSeccionHonorariosAnual.classList.remove('oculto');
-  elTablaHonorariosAnualBody.innerHTML = '';
-
-  // Misma cartera elegida arriba para la tabla principal -- esta sección no
-  // tiene su propio buscador, solo hereda el filtro de cartera.
-  const clientesConCuotaAnual = filtrarClientesPorCartera(clientesCacheHonorarios).filter((cliente) => {
-    const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
-    return honorario?.monto_anual !== null && honorario?.monto_anual !== undefined;
-  });
-
-  if (clientesConCuotaAnual.length === 0) {
-    elTablaHonorariosAnualBody.innerHTML = `<tr><td colspan="4" class="sin-datos">No hay clientes con cuota anual configurada.</td></tr>`;
-    return;
-  }
-
-  for (const cliente of clientesConCuotaAnual) {
-    const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
-    const saldoAnual = calcularSaldoPorTipo(honorario, cliente, 'anual') ?? 0;
-    const estadoAnual = { estado: saldoAnual > 0 ? 'debe' : 'al_dia', saldoPendiente: saldoAnual };
-    const badgesDeudaCongeladaAnual = dibujarBadgesDeudaCongelada(cliente.id, 'anual');
-    // Mientras no se active, el botón invita a activarlo; una vez activado
-    // (ya sea "Debe" o ya se pagó y quedó "Al día"), se puede desactivar
-    // para el año que viene -- ver el listener de "click" más abajo.
-    const botonActivar = honorario.anual_habilitado_desde
-      ? `<button type="button" class="boton boton-chico" data-desactivar-anual-id="${cliente.id}">Desactivar cobro anual</button>`
-      : `<button type="button" class="boton boton-chico" data-activar-anual-id="${cliente.id}">Activar cobro anual</button>`;
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escaparHtmlHonorarios(cliente.razon_social)}</td>
-      <td>${formatearGuaranies(honorario.monto_anual)}</td>
-      <td>${dibujarBadgeEstado(estadoAnual)}${badgesDeudaCongeladaAnual ? `<br />${badgesDeudaCongeladaAnual}` : ''}</td>
-      <td>${botonActivar}</td>
-    `;
-    elTablaHonorariosAnualBody.appendChild(tr);
-  }
-}
 
 // Activa/desactiva el cobro de la cuota anual de un cliente (ver
 // `anual_habilitado_desde` en schema.sql y calcularSaldoPorTipo). Al
@@ -728,29 +768,33 @@ async function cambiarAnualHabilitado(clienteId, activar) {
     if (honorario) honorario.anual_habilitado_desde = nuevoValor;
 
     dibujarTablaHonorarios();
-    dibujarSeccionHonorariosAnual();
   } catch (error) {
     console.error('Error al cambiar el cobro de la cuota anual:', error);
     mostrarMensajeHonorarios('No se pudo guardar el cambio. Intentá de nuevo.', 'error');
   }
 }
 
-if (elTablaHonorariosAnualBody) {
-  elTablaHonorariosAnualBody.addEventListener('click', (evento) => {
-    const botonActivar = evento.target.closest('button[data-activar-anual-id]');
-    if (botonActivar) {
-      cambiarAnualHabilitado(Number(botonActivar.dataset.activarAnualId), true);
-      return;
-    }
-
-    const botonDesactivar = evento.target.closest('button[data-desactivar-anual-id]');
-    if (botonDesactivar) {
-      cambiarAnualHabilitado(Number(botonDesactivar.dataset.desactivarAnualId), false);
-    }
-  });
-}
-
 // --- Filas expandibles de la tabla principal (pago / editar cuota / detalle) --
+
+// Cierra con una transición (ver .fila-expandible-grid en css/style.css):
+// se saca la clase "abierta" primero, y recién cuando termina la
+// transición se vacía el contenido -- si se vaciara de una, el contenido
+// desaparecería de golpe y no habría nada que "encoger" visualmente.
+// Los checkboxes de la grilla mensual solo son un DISPARADOR para abrir el
+// formulario de pago (registrar o editar) -- el estado real lo decide
+// siempre pagosCache. Al cerrar sin guardar (Cancelar), hay que devolver
+// cada checkbox a lo que diga esa fuente de verdad, no a "destildado": si
+// el mes ya estaba pagado y el usuario lo destildó para editarlo pero
+// canceló, tiene que volver a quedar tildado.
+function sincronizarCheckboxGrilla(casilla) {
+  const clienteId = Number(casilla.dataset.clienteId);
+  const mes = Number(casilla.dataset.mesPago);
+  const anio = Number(casilla.dataset.anioPago) || new Date().getFullYear();
+  const periodoISO = formatearFechaISO(new Date(anio, mes - 1, 1));
+  casilla.checked = pagosCache.some(
+    (p) => p.cliente_id === clienteId && p.tipo_honorario === 'mensual' && p.periodo === periodoISO
+  );
+}
 
 // Cierra con una transición (ver .fila-expandible-grid en css/style.css):
 // se saca la clase "abierta" primero, y recién cuando termina la
@@ -761,9 +805,7 @@ function cerrarTodasLasFilasExpandibles() {
     grid.classList.remove('abierta');
     grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
   });
-  elTablaHonorariosBody.querySelectorAll('input[data-pagar-cliente]').forEach((casilla) => {
-    casilla.checked = false;
-  });
+  elTablaHonorariosBody.querySelectorAll('input.checkbox-grilla-honorarios').forEach(sincronizarCheckboxGrilla);
 }
 
 function cerrarFilaExpandible(clienteId) {
@@ -773,8 +815,9 @@ function cerrarFilaExpandible(clienteId) {
     grid.classList.remove('abierta');
     grid.addEventListener('transitionend', () => { grid.querySelector('.fila-expandible-contenido').innerHTML = ''; }, { once: true });
   }
-  const casilla = elTablaHonorariosBody.querySelector(`input[data-pagar-cliente="${clienteId}"]`);
-  if (casilla) casilla.checked = false;
+  elTablaHonorariosBody
+    .querySelectorAll(`input.checkbox-grilla-honorarios[data-cliente-id="${clienteId}"]`)
+    .forEach(sincronizarCheckboxGrilla);
 }
 
 // Abre la fila expandible del cliente con el HTML dado, cerrando primero
@@ -841,13 +884,19 @@ function construirCamposPeriodoHtml(tipo, fechaPeriodo) {
 // registrar un pago nuevo (sugiere el período vigente y el monto pactado);
 // si viene un pago, es para corregirlo (precarga sus valores actuales y
 // guarda con UPDATE en vez de INSERT -- ver guardarPagoInline).
-function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
+// `tipoForzado`/`periodoForzado`: cuando el formulario se abre desde una
+// celda puntual de la grilla (un mes, o el balance anual), ya sabemos
+// exactamente a qué tipo/período corresponde -- se fuerza ese valor (sin
+// selector de tipo, ver selectorTipoHtml) en vez de dejar que el usuario
+// elija o de asumir el período vigente, para que no pueda cargar sin
+// querer un pago con el tipo/período de la celda de al lado.
+function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null, tipoForzado = null, periodoForzado = null) {
   const cierreFiscalMes = cliente?.cierre_fiscal_mes ?? 12;
   const tieneMensual = honorario.monto_mensual !== null && honorario.monto_mensual !== undefined;
   const tieneAnual = honorario.monto_anual !== null && honorario.monto_anual !== undefined;
-  const tipoInicial = pagoExistente?.tipo_honorario || (tieneMensual ? 'mensual' : 'anual');
+  const tipoInicial = tipoForzado || pagoExistente?.tipo_honorario || (tieneMensual ? 'mensual' : 'anual');
 
-  const selectorTipoHtml = (tieneMensual && tieneAnual)
+  const selectorTipoHtml = (!tipoForzado && tieneMensual && tieneAnual)
     ? `
       <div class="fila-form">
         <label>Corresponde a</label>
@@ -868,7 +917,7 @@ function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
 
   const periodoFecha = pagoExistente
     ? new Date(`${pagoExistente.periodo}T00:00:00`)
-    : obtenerPeriodoVigente(tipoInicial, cierreFiscalMes);
+    : (periodoForzado || obtenerPeriodoVigente(tipoInicial, cierreFiscalMes));
 
   return `
     <form class="form-pago-inline" data-cliente-id="${cliente.id}" ${pagoExistente ? `data-pago-id="${pagoExistente.id}"` : ''}>
@@ -907,11 +956,15 @@ function construirFormularioPagoHtml(cliente, honorario, pagoExistente = null) {
   `;
 }
 
-function abrirFormularioPago(clienteId) {
+// Abre el formulario de pago de un cliente, ya sea para CARGAR uno nuevo
+// (pagoExistente null) o para EDITAR uno que ya existe -- siempre forzado a
+// un tipo/período puntual (el mes/año de la celda de la grilla que se
+// tildó/destildó, o "anual" del botón de balance), nunca dejando elegir.
+function abrirFormularioPagoParaPeriodo(clienteId, tipo, fechaPeriodo, pagoExistente) {
   const cliente = clientesCacheHonorarios.find((c) => c.id === clienteId);
   const honorario = honorariosCache.find((h) => h.cliente_id === clienteId);
   if (!cliente || !honorario) return;
-  abrirFilaExpandible(clienteId, construirFormularioPagoHtml(cliente, honorario));
+  abrirFilaExpandible(clienteId, construirFormularioPagoHtml(cliente, honorario, pagoExistente, tipo, fechaPeriodo));
 }
 
 // Al cambiar el tipo de cuota en el formulario (solo posible si el cliente
@@ -1194,9 +1247,11 @@ function construirListaOtrosGastosPendientesHtml(clienteId) {
       ${pendientes
         .map((gasto) => `
           <li data-fila-gasto-id="${gasto.id}">
-            ${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}
-            -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}
-            <button type="button" class="boton boton-chico" data-marcar-gasto-pagado-id="${gasto.id}">Marcar pagado</button>
+            <label class="celda-checkbox-inline">
+              <input type="checkbox" data-marcar-gasto-pagado-id="${gasto.id}" />
+              ${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)}
+              -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}
+            </label>
           </li>
         `)
         .join('')}
@@ -1346,33 +1401,11 @@ function construirFilaPagoHtml(pago, cliente) {
   `;
 }
 
-// Lista COMPLETA (pagados y pendientes) de "otros gastos" de un cliente,
-// para el Detalle -- a diferencia de construirListaOtrosGastosPendientesHtml
-// (usada en el panel de "Otros Gastos", que solo lista los pendientes
-// porque ahí lo que importa es poder marcarlos pagados), acá es de solo
-// lectura, sin botones de acción.
-function construirListaOtrosGastosDetalleHtml(clienteId) {
-  const gastos = otrosGastosCache
-    .filter((gasto) => gasto.cliente_id === clienteId)
-    .sort((a, b) => (a.fecha_cargo < b.fecha_cargo ? 1 : -1));
-
-  if (gastos.length === 0) {
-    return '<p class="sin-datos">Este cliente no tiene otros gastos cargados.</p>';
-  }
-
-  return `
-    <ul class="lista-resumen-importacion">
-      ${gastos
-        .map((gasto) => {
-          const detallePago = gasto.pagado
-            ? ` -- pagado el ${formatearFechaVisibleHonorarios(gasto.fecha_pago)} (${formatearFormaPago(gasto.forma_pago)}${gasto.numero_recibo ? `, recibo ${escaparHtmlHonorarios(gasto.numero_recibo)}` : ''})`
-            : ' -- <strong>pendiente</strong>';
-          return `<li>${escaparHtmlHonorarios(gasto.descripcion)}: ${formatearGuaranies(gasto.monto)} -- cargado el ${formatearFechaVisibleHonorarios(gasto.fecha_cargo)}${detallePago}</li>`;
-        })
-        .join('')}
-    </ul>`;
-}
-
+// Detalle de un cliente: SOLO el historial de pagos del honorario (cuota
+// mensual/anual) -- a pedido del usuario, ya no incluye Deuda Congelada ni
+// Otros Gastos acá (esos ya tienen su propio lugar: los badges bajo el
+// nombre del cliente en la grilla, y sus propias acciones en el
+// desplegable "Acciones").
 function construirDetalleClienteHtml(cliente) {
   const honorario = honorariosCache.find((h) => h.cliente_id === cliente.id);
   const resultado = calcularEstadoHonorario(honorario, cliente);
@@ -1385,15 +1418,10 @@ function construirDetalleClienteHtml(cliente) {
     ? pagosCliente.map((pago) => construirFilaPagoHtml(pago, cliente)).join('')
     : `<tr><td colspan="${PAGO_COLSPAN}" class="sin-datos">Todavía no se registró ningún pago.</td></tr>`;
 
-  const badgesDeudaCongelada = dibujarBadgesDeudaCongelada(cliente.id);
-  const badgeOtrosGastos = dibujarBadgeOtrosGastos(cliente.id);
-
   return `
     <div class="detalle-cliente-inline">
       <h3 class="fila-form-titulo">Historial de Pagos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
       <p>Saldo pendiente: ${dibujarBadgeEstado(resultado)}</p>
-      ${badgesDeudaCongelada ? `<p>${badgesDeudaCongelada}</p>` : ''}
-      ${badgeOtrosGastos ? `<p>${badgeOtrosGastos}</p>` : ''}
       <div class="tabla-scroll">
         <table class="tabla-clientes">
           <thead>
@@ -1405,8 +1433,6 @@ function construirDetalleClienteHtml(cliente) {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
-      <h3 class="fila-form-titulo">Otros Gastos — ${escaparHtmlHonorarios(cliente.razon_social)}</h3>
-      ${construirListaOtrosGastosDetalleHtml(cliente.id)}
       <div class="acciones-form">
         <button type="button" class="boton boton-secundario boton-chico" data-cancelar-inline>Cerrar</button>
       </div>
@@ -1437,14 +1463,36 @@ function abrirEdicionPagoEnFila(fila, pagoId) {
 // --- Manejo de eventos: tabla de Honorarios (fila del cliente) -----------
 
 elTablaHonorariosBody.addEventListener('change', (evento) => {
-  const casillaPagar = evento.target.closest('input[data-pagar-cliente]');
-  if (casillaPagar) {
-    const clienteId = Number(casillaPagar.dataset.pagarCliente);
-    if (casillaPagar.checked) {
-      abrirFormularioPago(clienteId);
+  // Checkbox de un mes de la grilla: tildar uno vacío abre el formulario
+  // para cargar ese pago puntual; destildar uno ya pagado abre ESE mismo
+  // pago para editarlo/corregirlo (nunca lo borra solo con el checkbox).
+  const casillaMes = evento.target.closest('input.checkbox-grilla-honorarios');
+  if (casillaMes) {
+    const clienteId = Number(casillaMes.dataset.clienteId);
+    const mes = Number(casillaMes.dataset.mesPago);
+    const anio = Number(casillaMes.dataset.anioPago);
+    const fechaPeriodo = new Date(anio, mes - 1, 1);
+    const periodoISO = formatearFechaISO(fechaPeriodo);
+    const pagoExistente = pagosCache.find(
+      (p) => p.cliente_id === clienteId && p.tipo_honorario === 'mensual' && p.periodo === periodoISO
+    );
+
+    if (casillaMes.checked) {
+      abrirFormularioPagoParaPeriodo(clienteId, 'mensual', fechaPeriodo, null);
+    } else if (pagoExistente) {
+      abrirFormularioPagoParaPeriodo(clienteId, 'mensual', fechaPeriodo, pagoExistente);
     } else {
       cerrarFilaExpandible(clienteId);
     }
+    return;
+  }
+
+  // Checkbox de la columna Anual: activa/desactiva el cobro (acción
+  // directa, sin formulario -- ver cambiarAnualHabilitado). El pago en sí
+  // se registra tocando el botón de balance de al lado, no acá.
+  const casillaAnual = evento.target.closest('input[data-anual-checkbox-cliente]');
+  if (casillaAnual) {
+    cambiarAnualHabilitado(Number(casillaAnual.dataset.anualCheckboxCliente), casillaAnual.checked);
     return;
   }
 
@@ -1469,6 +1517,20 @@ elTablaHonorariosBody.addEventListener('change', (evento) => {
     else if (accion === 'detalle') abrirDetalleCliente(clienteId);
     else if (accion === 'deuda-congelada') abrirFormularioCongelarDeuda(clienteId);
     else if (accion === 'otros-gastos') abrirFormularioOtrosGastos(clienteId);
+    return;
+  }
+
+  // Checkbox "pagado" de un otro gasto pendiente (panel Otros Gastos):
+  // tildarla despliega, en el lugar, el mini-formulario para cargar fecha
+  // de pago/forma de pago/N° de recibo -- el gasto recién se da por pagado
+  // cuando se envía ese formulario (ver guardarGastoPagadoInline), así que
+  // si se destilda antes de eso no hay nada que revertir.
+  const casillaGastoPagado = evento.target.closest('input[data-marcar-gasto-pagado-id]');
+  if (casillaGastoPagado && casillaGastoPagado.checked) {
+    const gastoId = Number(casillaGastoPagado.dataset.marcarGastoPagadoId);
+    const gasto = otrosGastosCache.find((g) => g.id === gastoId);
+    const filaGasto = evento.target.closest('li[data-fila-gasto-id]');
+    if (gasto && filaGasto) filaGasto.innerHTML = construirSubformularioMarcarGastoPagadoHtml(gasto);
   }
 });
 
@@ -1496,12 +1558,20 @@ elTablaHonorariosBody.addEventListener('click', (evento) => {
     return;
   }
 
-  const botonMarcarGastoPagado = evento.target.closest('button[data-marcar-gasto-pagado-id]');
-  if (botonMarcarGastoPagado) {
-    const gastoId = Number(botonMarcarGastoPagado.dataset.marcarGastoPagadoId);
-    const gasto = otrosGastosCache.find((g) => g.id === gastoId);
-    const filaGasto = evento.target.closest('li[data-fila-gasto-id]');
-    if (gasto && filaGasto) filaGasto.innerHTML = construirSubformularioMarcarGastoPagadoHtml(gasto);
+  // Botón de balance de la columna Anual: abre el formulario para
+  // registrar (o editar, si ya hay uno cargado para este año) el pago de
+  // la cuota anual. El checkbox de al lado es lo que activa/desactiva el
+  // cobro (ver el listener de "change"); esto solo registra el pago en sí.
+  const botonBalanceAnual = evento.target.closest('button[data-anual-balance-cliente]');
+  if (botonBalanceAnual) {
+    const clienteId = Number(botonBalanceAnual.dataset.anualBalanceCliente);
+    const anioActual = new Date().getFullYear();
+    const fechaPeriodo = new Date(anioActual, 0, 1);
+    const periodoISO = formatearFechaISO(fechaPeriodo);
+    const pagoExistente = pagosCache.find(
+      (p) => p.cliente_id === clienteId && p.tipo_honorario === 'anual' && p.periodo === periodoISO
+    );
+    abrirFormularioPagoParaPeriodo(clienteId, 'anual', fechaPeriodo, pagoExistente);
     return;
   }
 
@@ -1621,6 +1691,99 @@ function dibujarTablaPagos() {
     elTablaPagosBody.insertAdjacentHTML('beforeend', construirFilaPagoHtml(pago, cliente));
   }
 }
+
+// --- Exportar Historial de Pagos (Excel / PDF) ----------------------------
+// Exporta lo que esté FILTRADO en pantalla (mismo Año/Mes que la tabla),
+// no todo pagosCache -- así el archivo coincide siempre con lo que se está
+// viendo. El PDF reutiliza el mismo modal de previsualización que la Ficha
+// de un cliente (#ficha-pago-imprimir), armando una tabla genérica en vez
+// de la ficha mensual/anual de un cliente puntual.
+
+async function descargarHistorialPagosExcel() {
+  const pagosFiltrados = filtrarPagosParaTabla();
+  if (pagosFiltrados.length === 0) {
+    mostrarMensajeHonorarios('No hay pagos para exportar con este filtro.', 'error');
+    return;
+  }
+
+  const filas = pagosFiltrados.map((pago) => {
+    const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
+    return {
+      Cliente: cliente?.razon_social ?? '',
+      'Corresponde a': pago.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual',
+      'Monto Gs.': Number(pago.monto_pagado),
+      'Forma de Pago': formatearFormaPago(pago.forma_pago),
+      'N° Recibo': pago.numero_recibo ?? '',
+      'Fecha de Pago': pago.fecha_pago,
+      Período: pago.periodo,
+    };
+  });
+
+  try {
+    await descargarComoExcel('historial-de-pagos.xlsx', [{ nombre: 'Historial de Pagos', filas }]);
+  } catch (error) {
+    console.error('Error al exportar el historial de pagos a Excel:', error);
+    const mensaje = error instanceof ErrorLibreriaExcelNoDisponible ? error.message : 'No se pudo generar el archivo Excel.';
+    mostrarMensajeHonorarios(mensaje, 'error');
+  }
+}
+
+function generarFichaHistorialPagos() {
+  const pagosFiltrados = filtrarPagosParaTabla();
+  if (pagosFiltrados.length === 0) {
+    mostrarMensajeHonorarios('No hay pagos para exportar con este filtro.', 'error');
+    return;
+  }
+
+  const nombreEstudio = configuracionEstudio?.nombre_estudio || 'Estudio Contable';
+  const direccion = configuracionEstudio?.direccion || '';
+  const telefono = configuracionEstudio?.telefono || '';
+  const logoHtml = configuracionEstudio?.logo_base64
+    ? `<img src="${configuracionEstudio.logo_base64}" alt="Logo del estudio" class="ficha-logo" />`
+    : '';
+
+  const filasHtml = pagosFiltrados
+    .map((pago) => {
+      const cliente = clientesCacheHonorarios.find((c) => c.id === pago.cliente_id);
+      return `
+        <tr>
+          <td>${escaparHtmlHonorarios(cliente?.razon_social ?? '')}</td>
+          <td>${pago.tipo_honorario === 'mensual' ? 'Cuota Mensual' : 'Cuota Anual'}</td>
+          <td class="num">${Number(pago.monto_pagado).toLocaleString('es-PY')}</td>
+          <td>${formatearFormaPago(pago.forma_pago)}</td>
+          <td>${pago.numero_recibo ? escaparHtmlHonorarios(pago.numero_recibo) : ''}</td>
+          <td>${formatearFechaVisibleHonorarios(pago.fecha_pago)}</td>
+          <td>${formatearFechaVisibleHonorarios(pago.periodo)}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  elFichaContenido.innerHTML = `
+    <div class="ficha-membrete">
+      <div>
+        <h1>${escaparHtmlHonorarios(nombreEstudio)}</h1>
+        ${direccion ? `<p>${escaparHtmlHonorarios(direccion)}</p>` : ''}
+        ${telefono ? `<p>Tel: ${escaparHtmlHonorarios(telefono)}</p>` : ''}
+      </div>
+      ${logoHtml}
+    </div>
+    <div class="ficha-cliente-banner">Historial de Pagos</div>
+    <table class="ficha-tabla">
+      <thead>
+        <tr>
+          <th>Cliente</th><th>Corresponde a</th><th>Monto Gs.</th><th>Forma de Pago</th>
+          <th>Recibo N°</th><th>Fecha de Pago</th><th>Período</th>
+        </tr>
+      </thead>
+      <tbody>${filasHtml}</tbody>
+    </table>
+  `;
+  elFichaImprimir.classList.remove('oculto');
+}
+
+if (elBtnHistorialExcel) elBtnHistorialExcel.addEventListener('click', descargarHistorialPagosExcel);
+if (elBtnHistorialPdf) elBtnHistorialPdf.addEventListener('click', generarFichaHistorialPagos);
 
 elTablaPagosBody.addEventListener('click', (evento) => {
   const botonEditarPago = evento.target.closest('button[data-editar-pago-id]');
@@ -1786,6 +1949,24 @@ if (elBtnFichaCerrar) {
 // mismo criterio que un modal común -- clickear la ficha en sí no la cierra.
 elFichaImprimir.addEventListener('click', (evento) => {
   if (evento.target === elFichaImprimir) elFichaImprimir.classList.add('oculto');
+});
+
+// --- Secciones colapsables (Honorarios por Cliente / Historial de Pagos) --
+// Arrancan cerradas para no tirar de golpe toda la información de una --
+// el botón "Ver"/"Ocultar" las despliega con la misma animación
+// grid-template-rows que ya usa .fila-expandible-grid, pero a nivel de
+// sección entera en vez de fila de tabla. El contenido ya está armado en
+// el DOM desde que carga la pantalla (las tablas se dibujan igual,
+// visibles o no); esto solo controla si se ve.
+document.querySelectorAll('[data-toggle-seccion]').forEach((boton) => {
+  const grid = document.getElementById(`seccion-colapsable-${boton.dataset.toggleSeccion}`);
+  if (!grid) return;
+
+  boton.addEventListener('click', () => {
+    const abrir = !grid.classList.contains('abierta');
+    grid.classList.toggle('abierta', abrir);
+    boton.textContent = abrir ? 'Ocultar' : 'Ver';
+  });
 });
 
 // Exponemos solo esta función en "window" para que navegacion.js pueda
