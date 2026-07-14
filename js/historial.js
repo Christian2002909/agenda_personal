@@ -225,7 +225,7 @@ async function dibujarHistorial() {
     ] = await Promise.all([
       supabaseHistorial
         .from('cliente_obligaciones')
-        .select('clientes(id, razon_social, terminacion_ruc, cierre_fiscal_mes, responsable_id)')
+        .select('clientes(id, razon_social, ruc, terminacion_ruc, cierre_fiscal_mes, responsable_id)')
         .eq('obligacion_id', obligacionId),
       supabaseHistorial
         .from('presentaciones')
@@ -356,6 +356,7 @@ function dibujarGrupoMensual(clientes, obligacion, presentacionesPorClientePerio
       <thead>
         <tr>
           <th>Cliente</th>
+          <th>RUC</th>
           ${NOMBRES_MES_HISTORIAL.map((mes) => `<th>${mes}</th>`).join('')}
         </tr>
       </thead>
@@ -401,6 +402,7 @@ function dibujarGrupoMensual(clientes, obligacion, presentacionesPorClientePerio
 
       tr.innerHTML = `
         <td><button class="boton-link" data-editar-cliente="${cliente.id}">${escaparHtmlHistorial(cliente.razon_social)}</button></td>
+        <td>${escaparHtmlHistorial(cliente.ruc)}</td>
         ${celdasMes.join('')}
       `;
       tbody.appendChild(tr);
@@ -447,6 +449,7 @@ function dibujarGrupoAnual(clientes, obligacion, presentacionesPorClientePeriodo
       <thead>
         <tr>
           <th>Cliente</th>
+          <th>RUC</th>
           <th>Ejercicio</th>
           <th>Vencimiento</th>
           <th>Presentado</th>
@@ -478,6 +481,7 @@ function dibujarGrupoAnual(clientes, obligacion, presentacionesPorClientePeriodo
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><button class="boton-link" data-editar-cliente="${cliente.id}">${escaparHtmlHistorial(cliente.razon_social)}</button></td>
+        <td>${escaparHtmlHistorial(cliente.ruc)}</td>
         <td>${anioSeleccionado}</td>
         <td>${formatearFechaVisibleHistorial(fechaVencimiento)}</td>
         ${construirCeldaEditableHtml({
