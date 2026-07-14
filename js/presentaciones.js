@@ -2,45 +2,50 @@
 // -----------------------------------------------------------------------
 // Pantalla principal de la app. Reemplaza también a la antigua pestaña
 // Calendario (eliminada): para cada cliente se muestra, en una TABLA
-// compacta, el estado del período VIGENTE de cada obligación que tiene
-// asignada (tabla cliente_obligaciones) -- mensuales y anuales por igual.
+// compacta, el estado del período VIGENTE de las obligaciones de UN grupo
+// elegido en el selector "Obligación" -- una fila por cliente, una columna
+// por obligación del grupo.
 //
-// A diferencia del diseño anterior (un bloque por cliente con checkboxes
-// apilados, que solo mostraba lo pendiente y en el que el cliente
-// desaparecía apenas se presentaba todo), ahora es una tabla de verdad:
-// una fila por cliente, una columna por obligación. Las FILAS (clientes)
-// nunca desaparecen mientras tengan alguna obligación asignada -- el
-// checkbox de la celda simplemente refleja si el período vigente ya se
-// presentó o no (con su fecha de vencimiento visible), y cuando el período
-// cambia (nuevo mes/año) la celda vuelve a mostrarse pendiente
-// automáticamente.
+// El selector "Obligación" NO ofrece una obligación por opción ni una
+// opción "Todas": son 5 GRUPOS fijos (confirmado explícitamente por el
+// usuario, ver GRUPOS_OBLIGACION más abajo), cada uno con su propia lista
+// de columnas -- porque en la práctica varias obligaciones se presentan
+// siempre juntas para el mismo cliente:
+//   - IVA         -> IVA + RG 90 Mensual
+//   - IRE Simple  -> IRE Simple sola
+//   - IRE General -> IRE General + Estado Financiero + IDU
+//   - IRP-RSP     -> IRP-RSP + RG 90 Anual
+//   - IRP-RGC     -> IRP-RGC sola (los clientes de este régimen siempre
+//                    tienen IVA también, así que RG 90 Anual no les
+//                    correspondería nunca, ver regla siguiente)
+// RG 90 Anual es un caso especial: un cliente que tiene IVA asignado NUNCA
+// la ve (en su lugar ya tiene RG 90 Mensual en el grupo IVA) -- la columna
+// se calcula por cliente, no por grupo entero, aunque esté en la lista de
+// columnas de IRP-RSP.
 //
-// Las COLUMNAS de obligación son "automáticas" por defecto, pero con una
-// regla distinta según periodicidad (confirmado explícitamente por el
-// usuario, ver dibujarGrupos): las mensuales (IVA, RG 90 Mensual) se
-// muestran siempre que algún cliente del grupo las tenga asignadas; las
-// anuales (IRE Simple/General, Estado Financiero, RG 90 Anual, IRP-RSP,
-// IRP-RGC) solo se muestran mientras estén PENDIENTES para algún cliente
-// del grupo -- apenas se confirman todas las que había pendientes, la
-// columna entera desaparece hasta que vuelva a haber alguna pendiente
-// (el período siguiente, el año que viene). El cálculo es por grupo de
-// terminación de RUC, no global, para que un grupo no arrastre una columna
-// vacía nada más porque un cliente de OTRO grupo la tiene asignada. Un
-// selector adicional ("Obligación") permite acotar la tabla a una sola
-// obligación puntual sin esta regla (se muestra igual, presentada o no),
-// mismo patrón que ya usa el filtro de Historial (js/historial.js). La
-// obligación IDU (periodicidad "manual") nunca es columna, ni automática
-// ni seleccionable a mano -- igual que antes.
+// IDU (periodicidad "manual" en el catálogo) es distinto al resto: nunca
+// tiene una fecha de vencimiento calculable (no hay regla de "N meses
+// después del cierre" para ella) ni se pre-genera sola -- se confirma a
+// mano cuando el contador determina que corresponde. Su celda muestra un
+// checkbox sin fecha ("según corresponda") en vez de una fecha calculada.
+//
+// El selector arranca en IVA (primer grupo) y no recuerda haber mostrado
+// "todo junto" -- cada grupo que tiene algo anual (o IDU) muestra, al lado
+// de su nombre en el selector, la cantidad de pendientes entre paréntesis
+// (ej. "IRE General (4)"), para que sin entrar se sepa cuánto falta
+// confirmar; el número no aparece si está en cero.
 //
 // Los clientes se agrupan por terminación de RUC ("VENCIMIENTO N - FECHA
 // D", el día fijo por terminación -- no cambia entre obligaciones) igual
-// que la planilla de control que usaba el estudio antes de esta app.
+// que la planilla de control que usaba el estudio antes de esta app. Un
+// cliente solo aparece si tiene asignada al menos una obligación del grupo
+// elegido.
 //
 // El selector "Ver cartera de" (Yo / cada perfil / Todos) filtra los
 // clientes mostrados por `clientes.responsable_id`; es solo un filtro de
 // visualización, no de acceso (cualquiera puede ver y marcar presentado
 // clientes de cualquier responsable). Se aplica primero, y sobre esos
-// clientes se arma la tabla.
+// clientes se arma la tabla y se cuentan los pendientes de cada grupo.
 // -----------------------------------------------------------------------
 
 // Todo el archivo va adentro de esta función para que sus variables no
@@ -67,9 +72,23 @@ const elPresentacionesMensaje = document.getElementById('presentaciones-mensaje'
 const VALOR_CARTERA_YO = 'yo';
 const VALOR_CARTERA_TODOS = 'todos';
 
-// Catálogo de obligaciones automáticas (todas menos "manual" = IDU), ya
-// filtrado según el panel RG 90 de Configuración. Es también el universo
-// de opciones del selector "Obligación" (más la opción "Todas").
+// Los 5 grupos fijos del selector "Obligación" -- ver comentario de
+// cabecera. `codigos` son los `obligaciones.codigo` (catálogo) que arma
+// las columnas de ese grupo, en el orden en que se muestran.
+const GRUPOS_OBLIGACION = [
+  { id: 'IVA', label: 'IVA', codigos: ['IVA', 'RG90_MENSUAL'] },
+  { id: 'IRE_SIMPLE', label: 'IRE Simple', codigos: ['IRE_SIMPLE'] },
+  { id: 'IRE_GENERAL', label: 'IRE General', codigos: ['IRE_GENERAL', 'ESTADO_FINANCIERO', 'IDU'] },
+  { id: 'IRP_RSP', label: 'IRP-RSP', codigos: ['IRP_RSP', 'RG90_ANUAL'] },
+  { id: 'IRP_RGC', label: 'IRP-RGC', codigos: ['IRP_RGC'] },
+];
+
+// Catálogo completo de obligaciones (incluye IDU, a diferencia del diseño
+// anterior -- acá sí hace falta para armar la columna de IDU dentro del
+// grupo IRE General), ya filtrado según el panel RG 90 de Configuración
+// (saca RG90_MENSUAL/RG90_ANUAL del catálogo si el panel está apagado, lo
+// que automáticamente las saca también de las columnas de los grupos que
+// las usan).
 let obligacionesCache = [];
 // Perfiles (tabla `perfiles`), para armar las opciones del selector de cartera.
 let perfilesCache = [];
@@ -79,13 +98,12 @@ let usuarioActualId = null;
 
 // Crea (si todavía no existe) el registro "pendiente" del período vigente
 // para cada obligación que el contador le asignó a cada cliente (tabla
-// cliente_obligaciones, configurada desde la pantalla de Clientes). Las
-// obligaciones "manual" (IDU) quedan afuera, aunque estén asignadas. Si el
-// registro ya existe -sea pendiente o ya presentado-, no lo toca. Esto
-// corre para TODAS las obligaciones de cada cliente (no solo las que la
-// tabla vaya a mostrar según el selector de "Obligación"), porque la fila
-// tiene que existir de antemano para que el checkbox de la celda pueda
-// tildarla sin fallar.
+// cliente_obligaciones, configurada desde la pantalla de Clientes). IDU
+// (periodicidad "manual") queda afuera a propósito -- no se pre-genera,
+// se crea recién cuando se tilda su checkbox por primera vez (ver el
+// listener de "change" más abajo, que hace upsert genérico para cualquier
+// obligación). Si el registro ya existe -sea pendiente o ya presentado-,
+// no lo toca.
 async function asegurarPresentacionesDelPeriodoVigente() {
   const [
     { data: clientes, error: errorClientes },
@@ -133,11 +151,11 @@ async function asegurarPresentacionesDelPeriodoVigente() {
   if (error) throw error;
 }
 
-// --- Catálogo de obligaciones (columnas automáticas + selector manual) ---
+// --- Catálogo de obligaciones (columnas de cada grupo) --------------------
 
 async function cargarCatalogoObligaciones() {
   const [{ data, error }, { data: configuracion, error: errorConfiguracion }] = await Promise.all([
-    supabasePresentaciones.from('obligaciones').select('*').neq('periodicidad', 'manual').order('id'),
+    supabasePresentaciones.from('obligaciones').select('*').order('id'),
     supabasePresentaciones.from('configuracion_estudio').select('panel_rg90_visible').eq('id', 1).maybeSingle(),
   ]);
 
@@ -152,30 +170,35 @@ async function cargarCatalogoObligaciones() {
     : (data || []).filter((o) => o.codigo !== 'RG90_MENSUAL' && o.codigo !== 'RG90_ANUAL');
 }
 
-// Arma las opciones del selector manual "Obligación": "Todas" (comportamiento
-// automático de columnas, ver dibujarPresentaciones) + una por obligación del
-// catálogo -- mismo patrón que ya usa el filtro de Historial, pero con esta
-// opción extra por defecto en vez de arrancar en IVA.
+// Arma las 5 opciones fijas del selector "Obligación" una sola vez (no
+// dependen del catálogo cargado: siempre están las 5, lo que varía según
+// el panel RG 90 son las columnas/conteos de cada una). Si ya estaban
+// pobladas (se volvió a esta pestaña), no las vuelve a crear -- así no se
+// pierde la selección actual.
 function poblarFiltroObligacion() {
   if (!elFiltroObligacion) return;
+  if (elFiltroObligacion.options.length > 0) return;
 
-  const seleccionActual = elFiltroObligacion.value;
-  elFiltroObligacion.innerHTML = '';
-
-  const opcionTodas = document.createElement('option');
-  opcionTodas.value = '';
-  opcionTodas.textContent = 'Todas';
-  elFiltroObligacion.appendChild(opcionTodas);
-
-  for (const obligacion of obligacionesCache) {
+  for (const grupo of GRUPOS_OBLIGACION) {
     const opcion = document.createElement('option');
-    opcion.value = obligacion.id;
-    opcion.textContent = obligacion.nombre;
+    opcion.value = grupo.id;
+    opcion.textContent = grupo.label;
     elFiltroObligacion.appendChild(opcion);
   }
+  elFiltroObligacion.value = GRUPOS_OBLIGACION[0].id;
+}
 
-  const sigueExistiendo = [...elFiltroObligacion.options].some((o) => o.value === seleccionActual);
-  elFiltroObligacion.value = sigueExistiendo ? seleccionActual : '';
+// Actualiza el texto de cada opción del selector con la cantidad de
+// pendientes de ese grupo entre paréntesis (solo si es mayor a cero), sin
+// tocar cuál está seleccionada.
+function actualizarContadoresFiltroObligacion(conteosPendientesPorGrupo) {
+  if (!elFiltroObligacion) return;
+  for (const opcion of elFiltroObligacion.options) {
+    const grupo = GRUPOS_OBLIGACION.find((g) => g.id === opcion.value);
+    if (!grupo) continue;
+    const pendientes = conteosPendientesPorGrupo.get(grupo.id) || 0;
+    opcion.textContent = pendientes > 0 ? `${grupo.label} (${pendientes})` : grupo.label;
+  }
 }
 
 if (elFiltroObligacion) elFiltroObligacion.addEventListener('change', () => dibujarPresentaciones());
@@ -276,13 +299,46 @@ async function cargarPresentaciones() {
   }
 }
 
+// Calcula la celda de UNA obligación puntual para UN cliente: null si no
+// aplica (no asignada, o -caso especial RG 90 Anual- el cliente tiene IVA
+// asignado y por lo tanto ya se le muestra RG 90 Mensual en el grupo IVA
+// en su lugar). Para IDU (periodicidad "manual") no hay fecha de
+// vencimiento calculable -- queda en null a propósito, la celda lo
+// resuelve mostrando "según corresponda" en vez de una fecha.
+function calcularCeldaParaCliente(cliente, obligacion, codigosAsignados, feriadosSet, presentadosSet) {
+  if (!codigosAsignados.has(obligacion.codigo)) return null;
+  if (obligacion.codigo === 'RG90_ANUAL' && codigosAsignados.has('IVA')) return null;
+
+  const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
+  const periodicidadParaAncla = obligacion.periodicidad === 'manual' ? 'anual' : obligacion.periodicidad;
+  const periodoAncla = obtenerPeriodoVigente(periodicidadParaAncla, cierreFiscalMes);
+  const periodoISO = formatearFechaISO(periodoAncla);
+
+  let fechaVencimiento = null;
+  if (obligacion.periodicidad !== 'manual') {
+    fechaVencimiento = calcularFechaVencimiento({
+      codigoObligacion: obligacion.codigo,
+      periodicidad: obligacion.periodicidad,
+      terminacionRuc: cliente.terminacion_ruc,
+      periodoAncla,
+      feriadosSet,
+      cierreFiscalMes,
+    });
+    if (!fechaVencimiento) return null;
+  }
+
+  const clave = `${cliente.id}-${obligacion.id}-${periodoISO}`;
+  return {
+    periodo: periodoISO,
+    fechaVencimiento,
+    presentado: presentadosSet.has(clave),
+  };
+}
+
 async function dibujarPresentaciones() {
   try {
-    const idsObligacionesPermitidas = new Set(obligacionesCache.map((o) => o.id));
-    // Selector manual de una sola obligación: '' (opción "Todas") vuelve al
-    // comportamiento automático de columnas; con un id puntual, la tabla se
-    // acota a esa única obligación.
-    const obligacionSeleccionadaId = elFiltroObligacion?.value ? Number(elFiltroObligacion.value) : null;
+    const grupoSeleccionadoId = elFiltroObligacion?.value || GRUPOS_OBLIGACION[0].id;
+    const grupoSeleccionado = GRUPOS_OBLIGACION.find((g) => g.id === grupoSeleccionadoId) || GRUPOS_OBLIGACION[0];
 
     const [
       { data: clientes, error: errorClientes },
@@ -315,73 +371,70 @@ async function dibujarPresentaciones() {
 
     const clientesFiltrados = filtrarClientesPorCartera(clientes || []);
     const clientesPorId = new Map(clientesFiltrados.map((c) => [c.id, c]));
+    const obligacionesPorCodigo = new Map(obligacionesCache.map((o) => [o.codigo, o]));
 
-    // Por cliente, el conjunto de obligaciones asignadas en
-    // cliente_obligaciones que no sean "manual" (IDU) y pasen el filtro del
-    // panel RG 90. Si hay una obligación puntual elegida en el selector
-    // manual, se descarta cualquier otra.
-    const obligacionesAsignadasPorCliente = new Map();
+    // Por cliente, el conjunto de CÓDIGOS de obligación que tiene asignados
+    // en cliente_obligaciones (todas, sin filtrar por grupo ni por panel
+    // RG 90 acá -- esos filtros ya los aplica obligacionesPorCodigo al
+    // armar las columnas de cada grupo, y la regla especial de RG 90 Anual
+    // necesita saber si el cliente tiene IVA sin importar en qué grupo se
+    // esté mostrando la tabla).
+    const codigosAsignadosPorCliente = new Map();
     for (const fila of clienteObligaciones || []) {
       const cliente = clientesPorId.get(fila.cliente_id);
       const obligacion = fila.obligaciones;
-
       if (!cliente || !obligacion) continue;
-      if (!idsObligacionesPermitidas.has(obligacion.id)) continue;
-      if (obligacionSeleccionadaId !== null && obligacion.id !== obligacionSeleccionadaId) continue;
 
-      if (!obligacionesAsignadasPorCliente.has(cliente.id)) {
-        obligacionesAsignadasPorCliente.set(cliente.id, new Set());
+      if (!codigosAsignadosPorCliente.has(cliente.id)) {
+        codigosAsignadosPorCliente.set(cliente.id, new Set());
       }
-      obligacionesAsignadasPorCliente.get(cliente.id).add(obligacion.id);
+      codigosAsignadosPorCliente.get(cliente.id).add(obligacion.codigo);
     }
 
-    const obligacionesPorId = new Map(obligacionesCache.map((o) => [o.id, o]));
+    // Conteo de pendientes por grupo, para los contadores del selector --
+    // solo para los grupos que tienen algún componente anual o manual
+    // (IDU): las mensuales puras (IVA) no llevan aviso, ya se ven siempre.
+    const conteosPendientesPorGrupo = new Map();
+    for (const grupo of GRUPOS_OBLIGACION) {
+      const columnasDelGrupo = grupo.codigos.map((c) => obligacionesPorCodigo.get(c)).filter(Boolean);
+      const tieneComponenteAnualOManual = columnasDelGrupo.some((o) => o.periodicidad !== 'mensual');
+      if (!tieneComponenteAnualOManual) continue;
 
-    // Una fila por cliente (con terminación de RUC cargada y al menos una
-    // obligación asignada); `celdas` solo tiene una entrada por cada
-    // obligación efectivamente asignada a ESE cliente (no hay entradas
-    // "null" de relleno para las demás -- qué columnas se terminan
-    // mostrando lo decide dibujarGrupos, por grupo).
+      let pendientes = 0;
+      for (const cliente of clientesFiltrados) {
+        if (cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined) continue;
+        const codigosAsignados = codigosAsignadosPorCliente.get(cliente.id);
+        if (!codigosAsignados) continue;
+
+        for (const obligacion of columnasDelGrupo) {
+          const info = calcularCeldaParaCliente(cliente, obligacion, codigosAsignados, feriadosSet, presentadosSet);
+          if (info && !info.presentado) pendientes += 1;
+        }
+      }
+      conteosPendientesPorGrupo.set(grupo.id, pendientes);
+    }
+    actualizarContadoresFiltroObligacion(conteosPendientesPorGrupo);
+
+    // Filas de la tabla: solo las columnas del grupo elegido.
+    const columnas = grupoSeleccionado.codigos.map((c) => obligacionesPorCodigo.get(c)).filter(Boolean);
+
     const filas = [];
     for (const cliente of clientesFiltrados) {
       if (cliente.terminacion_ruc === null || cliente.terminacion_ruc === undefined) continue;
+      const codigosAsignados = codigosAsignadosPorCliente.get(cliente.id);
+      if (!codigosAsignados || codigosAsignados.size === 0) continue;
 
-      const asignadas = obligacionesAsignadasPorCliente.get(cliente.id);
-      if (!asignadas || asignadas.size === 0) continue;
-
-      const cierreFiscalMes = cliente.cierre_fiscal_mes ?? 12;
       const celdas = new Map();
-
-      for (const obligacionId of asignadas) {
-        const obligacion = obligacionesPorId.get(obligacionId);
-        if (!obligacion) continue;
-
-        const periodoAncla = obtenerPeriodoVigente(obligacion.periodicidad, cierreFiscalMes);
-        const periodoISO = formatearFechaISO(periodoAncla);
-        const fechaVencimiento = calcularFechaVencimiento({
-          codigoObligacion: obligacion.codigo,
-          periodicidad: obligacion.periodicidad,
-          terminacionRuc: cliente.terminacion_ruc,
-          periodoAncla,
-          feriadosSet,
-          cierreFiscalMes,
-        });
-
-        if (!fechaVencimiento) continue;
-
-        const clave = `${cliente.id}-${obligacion.id}-${periodoISO}`;
-        celdas.set(obligacion.id, {
-          periodo: periodoISO,
-          fechaVencimiento,
-          presentado: presentadosSet.has(clave),
-        });
+      for (const obligacion of columnas) {
+        const info = calcularCeldaParaCliente(cliente, obligacion, codigosAsignados, feriadosSet, presentadosSet);
+        if (info) celdas.set(obligacion.id, info);
       }
 
       if (celdas.size === 0) continue;
       filas.push({ cliente, celdas });
     }
 
-    dibujarGrupos(filas, obligacionesCache, obligacionSeleccionadaId === null);
+    dibujarGrupos(filas, columnas);
     // La carga salió bien: si había quedado pegado un cartel de error de
     // un intento anterior (por ejemplo, el primero antes de loguearse),
     // lo ocultamos.
@@ -397,33 +450,17 @@ async function dibujarPresentaciones() {
 
 // Agrupa por terminación de RUC (como la planilla de control: "VENCIMIENTO
 // N - FECHA D") y dibuja, dentro de cada grupo, una tabla con una fila por
-// cliente y una columna por obligación, en orden alfabético; la numeración
-// es correlativa sin cortes entre grupos.
-//
-// Las columnas se calculan POR GRUPO (no una única lista global compartida
-// por toda la pantalla), y con una regla distinta según la periodicidad,
-// confirmada explícitamente por el usuario:
-//   - Mensuales (IVA, RG 90 Mensual): la columna se muestra siempre que
-//     algún cliente del grupo la tenga asignada, esté presentada o no
-//     (igual que antes).
-//   - Anuales (IRE Simple/General, Estado Financiero, RG 90 Anual, IRP-RSP,
-//     IRP-RGC): la columna solo se muestra mientras algún cliente del grupo
-//     la tenga PENDIENTE. En cuanto se confirma (presentado) y ya no queda
-//     nadie pendiente de esa obligación en el grupo, la columna entera
-//     desaparece -- vuelve a aparecer sola cuando el período siguiente
-//     (el año que viene) quede pendiente de nuevo.
-// Un grupo sin ninguna columna relevante en este momento no se dibuja.
-// Esta regla de ocultamiento NO aplica cuando hay una obligación puntual
-// elegida a mano en el selector "Obligación" -- ahí se quiere ver esa
-// obligación igual, esté pendiente o ya presentada para todos (mismo
-// criterio que el filtro de Historial).
-function dibujarGrupos(filas, obligacionesCache, aplicarOcultamientoDeAnuales) {
+// cliente y las columnas del grupo de obligación elegido (compartidas por
+// toda la pantalla), en orden alfabético; la numeración es correlativa sin
+// cortes entre grupos.
+function dibujarGrupos(filas, columnas) {
   elGrupos.innerHTML = '';
 
-  if (filas.length === 0) {
+  if (filas.length === 0 || columnas.length === 0) {
     elSinPresentaciones.classList.remove('oculto');
     return;
   }
+  elSinPresentaciones.classList.add('oculto');
 
   const porTerminacion = new Map();
   for (const fila of filas) {
@@ -432,37 +469,12 @@ function dibujarGrupos(filas, obligacionesCache, aplicarOcultamientoDeAnuales) {
     porTerminacion.get(terminacion).push(fila);
   }
 
-  const gruposAMostrar = [];
-  for (const [terminacion, filasDelGrupo] of porTerminacion) {
-    const idsRelevantes = new Set();
-    for (const fila of filasDelGrupo) {
-      for (const [obligacionId, info] of fila.celdas) {
-        if (idsRelevantes.has(obligacionId)) continue;
-        const obligacion = obligacionesCache.find((o) => o.id === obligacionId);
-        if (!obligacion) continue;
-        if (!aplicarOcultamientoDeAnuales || obligacion.periodicidad === 'mensual' || !info.presentado) {
-          idsRelevantes.add(obligacionId);
-        }
-      }
-    }
-
-    const columnas = obligacionesCache.filter((o) => idsRelevantes.has(o.id));
-    if (columnas.length === 0) continue;
-
-    gruposAMostrar.push({ terminacion, filasDelGrupo, columnas });
-  }
-
-  if (gruposAMostrar.length === 0) {
-    elSinPresentaciones.classList.remove('oculto');
-    return;
-  }
-  elSinPresentaciones.classList.add('oculto');
-
-  gruposAMostrar.sort((a, b) => a.terminacion - b.terminacion);
+  const terminacionesOrdenadas = [...porTerminacion.keys()].sort((a, b) => a - b);
   let numero = 0;
 
-  for (const { terminacion, filasDelGrupo, columnas } of gruposAMostrar) {
-    filasDelGrupo.sort((a, b) => a.cliente.razon_social.localeCompare(b.cliente.razon_social));
+  for (const terminacion of terminacionesOrdenadas) {
+    const filasDelGrupo = porTerminacion.get(terminacion)
+      .sort((a, b) => a.cliente.razon_social.localeCompare(b.cliente.razon_social));
 
     const grupo = document.createElement('div');
     grupo.className = 'grupo-vencimiento';
@@ -538,12 +550,16 @@ function construirFilaCliente(numero, { cliente, celdas }, columnas) {
 // Celda editable de una obligación: todo el área de la celda es un <label>
 // que envuelve el checkbox de "presentado" (mismo patrón que ya usa la
 // grilla de Historial, celda-historial-toggle/-presentado/-pendiente),
-// mostrando siempre la fecha de vencimiento del período vigente -- tanto
-// si todavía está pendiente como si ya se presentó.
+// mostrando la fecha de vencimiento del período vigente -- tanto si
+// todavía está pendiente como si ya se presentó. IDU no tiene fecha
+// calculable (fechaVencimiento llega en null): se muestra "según
+// corresponda" en vez de una fecha, ya que se confirma a mano.
 function construirCeldaObligacionHtml({ clienteId, obligacionId, periodo, presentado, fechaVencimiento }) {
   const estadoClase = presentado ? 'celda-historial-presentado' : 'celda-historial-pendiente';
-  const fechaTexto = formatearFechaVisiblePresentaciones(fechaVencimiento);
-  const titulo = presentado ? `Presentado (venció ${fechaTexto})` : `Pendiente, vence ${fechaTexto}`;
+  const fechaTexto = fechaVencimiento ? formatearFechaVisiblePresentaciones(fechaVencimiento) : 'según corresponda';
+  const titulo = presentado
+    ? `Presentado${fechaVencimiento ? ` (venció ${fechaTexto})` : ''}`
+    : `Pendiente${fechaVencimiento ? `, vence ${fechaTexto}` : ' de confirmar'}`;
   return `
     <td class="celda-historial ${estadoClase}">
       <label class="celda-historial-toggle" title="${escaparHtmlPresentaciones(titulo)}">
@@ -587,7 +603,8 @@ elGrupos.addEventListener('click', (evento) => {
 // "update por id": el checkbox ya no conoce el id de la fila de
 // `presentaciones` (dejó de pedirse en la consulta), y esto además cubre
 // el caso borde de una fila que por algún motivo no se haya generado
-// todavía.
+// todavía -- incluida la primera vez que se tilda un IDU, que nunca se
+// pre-genera (ver asegurarPresentacionesDelPeriodoVigente).
 elGrupos.addEventListener('change', async (evento) => {
   const checkbox = evento.target.closest('input[type="checkbox"][data-cliente-id]');
   if (!checkbox) return;
@@ -615,7 +632,7 @@ elGrupos.addEventListener('change', async (evento) => {
     // La fila/celda del cliente sigue en pantalla tanto si se tildó como
     // si se destildó (a diferencia del diseño anterior, acá nada
     // desaparece) -- repintamos para reflejar el nuevo estado (checkbox +
-    // color de fondo de la celda).
+    // color de fondo de la celda + contador del selector).
     await dibujarPresentaciones();
   } catch (error) {
     console.error('Error al actualizar presentación:', error);

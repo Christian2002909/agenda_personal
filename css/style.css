@@ -514,6 +514,29 @@ input[type='search'] {
   cursor: pointer;
 }
 
+/* Columna "Acciones" de Honorarios: antes eran 5 botones sueltos que se
+   envolvían en 2 líneas por fila (muy cargado); ahora "Ficha" (la acción
+   más usada, genera el PDF) queda como botón aparte, y las otras 4
+   (Editar cuota/Detalle/Deuda congelada/Otros Gastos) se agrupan en un
+   único <select> "Acciones ▾" que vuelve solo al placeholder después de
+   cada elección (ver el listener de "change" en js/honorarios.js). */
+.celda-acciones-honorarios {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.selector-acciones-honorarios {
+  padding: 5px 8px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--color-borde);
+  background-color: var(--color-chico-fondo);
+  color: var(--color-chico-texto);
+  cursor: pointer;
+}
+
 /* Presentaciones dejó de armar un bloque por cliente con checkboxes
    apilados: ahora es una tabla de verdad (.tabla-clientes.tabla-presentaciones,
    ver más abajo la regla ".tabla-presentaciones td.celda-historial") con una
@@ -618,7 +641,22 @@ input[type='search'] {
 
 .boton-ver-password {
   flex-shrink: 0;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-texto-secundario);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.boton-ver-password:hover {
+  color: var(--color-texto);
+  background-color: var(--color-chico-fondo);
 }
 
 .fila-checkbox label {

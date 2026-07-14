@@ -59,7 +59,18 @@
           <label for="login-password">Contraseña</label>
           <div class="input-con-boton">
             <input type="password" id="login-password" required autocomplete="current-password" />
-            <button type="button" id="btn-ver-password" class="boton-link boton-ver-password">Ver</button>
+            <button
+              type="button"
+              id="btn-ver-password"
+              class="boton-ver-password"
+              aria-label="Mostrar contraseña"
+              title="Mostrar contraseña"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
           </div>
         </div>
         <div class="fila-form fila-checkbox">
@@ -236,8 +247,8 @@
           <div class="fila-form">
             <label for="presentaciones-filtro-obligacion">Obligación:</label>
             <select id="presentaciones-filtro-obligacion">
-              <!-- Las opciones se arman dinámicamente desde js/presentaciones.js:
-                   "Todas" (comportamiento automático) y una por obligación del catálogo. -->
+              <!-- Las 5 opciones (grupos fijos, no "Todas") se arman desde
+                   js/presentaciones.js -- ver GRUPOS_OBLIGACION ahí. -->
             </select>
           </div>
         </div>
