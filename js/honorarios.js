@@ -221,10 +221,22 @@ async function cargarUsuarioActual() {
   }
 }
 
+// A diferencia de las cargas imprescindibles de cargarHonorarios() (ver
+// comentario grande ahí), esta NO relanza el error hacia arriba: el
+// catálogo de perfiles solo se usa para sumar más opciones al selector
+// "Ver cartera de" ("Yo" y "Todos" no dependen de esto), así que si esta
+// consulta puntual falla (por ejemplo, un hiccup de red), el resto de la
+// pantalla igual tiene que poder cargar -- mismo criterio defensivo que ya
+// usa js/clientes.js con su propia cargarPerfiles().
 async function cargarPerfiles() {
-  const { data, error } = await supabaseHonorarios.from('perfiles').select('id, nombre').order('nombre');
-  if (error) throw error;
-  perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+  try {
+    const { data, error } = await supabaseHonorarios.from('perfiles').select('id, nombre').order('nombre');
+    if (error) throw error;
+    perfilesCache = (data || []).filter((perfil) => perfil.nombre);
+  } catch (error) {
+    console.error('Error al cargar la lista de perfiles para "Ver cartera de":', error);
+    perfilesCache = [];
+  }
 }
 
 // Arma las opciones "Yo" / cada perfil / "Todos". Si ya había una selección
@@ -284,17 +296,43 @@ function filtrarClientesPorCartera(clientes) {
 
 // --- Carga inicial -------------------------------------------------------
 
+// Carga "segura" de una de las tres tablas complementarias (deuda
+// congelada, otros gastos, configuración del estudio): si esta consulta
+// puntual falla -- por ejemplo, porque todavía no se volvió a pegar
+// schema.sql en Supabase después de agregar esa tabla/feature (ver
+// CLAUDE.md, "Database") -- NO debe tumbar el resto de la pantalla. Antes,
+// un solo error acá (aunque no tuviera nada que ver con la tabla principal
+// de Honorarios) hacía que cargarHonorarios() entero cayera al catch antes
+// de llegar a poblarFiltroCartera()/dibujarTablaHonorarios(), dejando
+// TANTO la tabla principal COMO el selector "Ver cartera de" -- ni
+// siquiera la opción "Yo" -- completamente en blanco, con el único aviso
+// siendo un cartel que además se auto-oculta a los 4 segundos (ver
+// mostrarMensajeHonorarios). Cae a un valor seguro y anota una advertencia
+// legible en vez de relanzar el error -- mismo espíritu defensivo que ya
+// usa excel-utils.js con el require() de exceljs.
+async function cargarTablaComplementariaSegura(tabla, etiqueta, construirQuery, advertencias) {
+  try {
+    const { data, error } = await construirQuery(supabaseHonorarios.from(tabla));
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error(`Error al cargar "${etiqueta}":`, error);
+    advertencias.push(etiqueta);
+    return null;
+  }
+}
+
 async function cargarHonorarios() {
   if (!supabaseHonorarios) return;
 
   try {
+    // Datos imprescindibles: sin esto la pantalla no tiene nada que
+    // mostrar, así que acá un error sigue siendo fatal para toda la carga
+    // (ver el catch de abajo).
     const [
       { data: clientes, error: errorClientes },
       { data: honorarios, error: errorHonorarios },
       { data: pagos, error: errorPagos },
-      { data: deudasCongeladas, error: errorDeudasCongeladas },
-      { data: otrosGastos, error: errorOtrosGastos },
-      { data: configuracion, error: errorConfiguracion },
     ] = await Promise.all([
       supabaseHonorarios
         .from('clientes')
@@ -302,21 +340,40 @@ async function cargarHonorarios() {
         .order('razon_social'),
       supabaseHonorarios.from('honorarios').select('*'),
       supabaseHonorarios.from('pagos_honorarios').select('*').order('fecha_pago', { ascending: false }),
-      supabaseHonorarios.from('deudas_congeladas_honorarios').select('*'),
-      supabaseHonorarios.from('otros_gastos_honorarios').select('*').order('fecha_cargo', { ascending: false }),
-      supabaseHonorarios.from('configuracion_estudio').select('*').eq('id', 1).maybeSingle(),
     ]);
 
     if (errorClientes) throw errorClientes;
     if (errorHonorarios) throw errorHonorarios;
     if (errorPagos) throw errorPagos;
-    if (errorDeudasCongeladas) throw errorDeudasCongeladas;
-    if (errorOtrosGastos) throw errorOtrosGastos;
-    if (errorConfiguracion) throw errorConfiguracion;
 
     clientesCacheHonorarios = clientes || [];
     honorariosCache = honorarios || [];
     pagosCache = pagos || [];
+
+    // Datos complementarios (ver cargarTablaComplementariaSegura arriba):
+    // cada uno cae a un valor seguro por separado si falla, en vez de
+    // tumbar toda la pantalla.
+    const advertencias = [];
+    const [deudasCongeladas, otrosGastos, configuracion] = await Promise.all([
+      cargarTablaComplementariaSegura(
+        'deudas_congeladas_honorarios',
+        'Deuda congelada',
+        (query) => query.select('*'),
+        advertencias
+      ),
+      cargarTablaComplementariaSegura(
+        'otros_gastos_honorarios',
+        'Otros Gastos',
+        (query) => query.select('*').order('fecha_cargo', { ascending: false }),
+        advertencias
+      ),
+      cargarTablaComplementariaSegura(
+        'configuracion_estudio',
+        'Configuración del estudio',
+        (query) => query.select('*').eq('id', 1).maybeSingle(),
+        advertencias
+      ),
+    ]);
     deudasCongeladasCache = deudasCongeladas || [];
     otrosGastosCache = otrosGastos || [];
     configuracionEstudio = configuracion || null;
@@ -328,10 +385,20 @@ async function cargarHonorarios() {
     dibujarSeccionHonorariosAnual();
     poblarFiltroAnioPagos();
     dibujarTablaPagos();
-    // La carga salió bien: si había quedado pegado un cartel de error de
-    // un intento anterior (por ejemplo, el primero antes de loguearse), lo
-    // ocultamos.
-    if (elHonorariosMensaje) elHonorariosMensaje.classList.add('oculto');
+
+    if (advertencias.length > 0) {
+      // Se ve el resto de la pantalla igual (tabla principal, selector de
+      // cartera, historial de pagos); solo avisamos qué NO se pudo cargar.
+      mostrarMensajeHonorarios(
+        `Los honorarios se cargaron, pero no se pudo traer: ${advertencias.join(', ')}. Puede que falte volver a correr schema.sql en Supabase (ver CLAUDE.md).`,
+        'error'
+      );
+    } else if (elHonorariosMensaje) {
+      // La carga salió bien: si había quedado pegado un cartel de error de
+      // un intento anterior (por ejemplo, el primero antes de loguearse), lo
+      // ocultamos.
+      elHonorariosMensaje.classList.add('oculto');
+    }
   } catch (error) {
     console.error('Error al cargar honorarios:', error);
     mostrarMensajeHonorarios('No se pudieron cargar los honorarios.', 'error');
