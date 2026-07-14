@@ -285,6 +285,88 @@ input[type='search'] {
   text-transform: uppercase;
 }
 
+/* Mismo título "VENCIMIENTO N - FECHA D" que .grupo-vencimiento-titulo,
+   pero como <td colspan> dentro de la tabla de Honorarios (esa es un
+   <table>, no permite un <div> de encabezado suelto como Presentaciones). */
+.celda-titulo-grupo-honorarios {
+  padding: 8px 12px;
+  background-color: var(--color-chico-fondo);
+  color: var(--color-chico-texto);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.fila-titulo-grupo-honorarios td {
+  border-bottom: none;
+}
+
+/* Columna "Anual" de la grilla de Honorarios: checkbox de activar/desactivar
+   el cobro + botón de balance (Debe/Al día) para registrar el pago en sí,
+   uno al lado del otro (no dentro del mismo <label>, para que clickear el
+   balance no tilde/destilde el checkbox de al lado). */
+.celda-anual-fila {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.celda-anual-fila input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Checkbox + texto en una sola línea clickeable, usado en la lista de
+   "Otros gastos" pendientes (tildar abre el mini-formulario para marcarlo
+   pagado). */
+.celda-checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.celda-checkbox-inline input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.fila-form-botones {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* --- Secciones colapsables (Honorarios por Cliente / Historial de Pagos) -
+   Arrancan cerradas (ver dibujarTablaHonorarios/dibujarTablaPagos, que las
+   arman igual estén visibles o no) -- mismo truco de grid-template-rows
+   0fr -> 1fr que .fila-expandible-grid, pero a nivel de sección entera. */
+.seccion-colapsable-encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.seccion-colapsable-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.seccion-colapsable-grid.abierta {
+  grid-template-rows: 1fr;
+}
+
+.seccion-colapsable-contenido {
+  overflow: hidden;
+}
+
 .celda-historial {
   text-align: center;
   font-size: 12px;
