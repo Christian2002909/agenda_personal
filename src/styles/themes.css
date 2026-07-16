@@ -37,21 +37,22 @@
   Fondos decorativos ILUSTRADOS (presets del selector "Fondo").
   Papel tapiz vectorial (SVG) de flores; cubre toda la ventana.
 */
+/* Fotos reales (colócalas en assets/). Debajo va un color de respaldo por si falta la foto. */
 body[data-fondo="lavanda"] {
-  background: url("../../assets/fondo-lavanda.svg") center / cover no-repeat fixed !important;
+  background: #d9c9f0 url("../../assets/fondo-lavanda.jpg") center / cover no-repeat fixed !important;
 }
 body[data-fondo="tulipanes"] {
-  background: url("../../assets/fondo-tulipanes.svg") center / cover no-repeat fixed !important;
+  background: #f6c9cf url("../../assets/fondo-tulipanes.jpg") center / cover no-repeat fixed !important;
 }
 
-/* En modo oscuro, se oscurece la ilustración con una capa encima para conservar contraste */
+/* En modo oscuro, se oscurece la foto con una capa encima para conservar contraste */
 :root[data-tema="oscuro"] body[data-fondo="lavanda"] {
   background:
-    linear-gradient(rgba(10, 8, 20, .58), rgba(10, 8, 20, .58)),
-    url("../../assets/fondo-lavanda.svg") center / cover no-repeat fixed !important;
+    linear-gradient(rgba(10, 8, 20, .5), rgba(10, 8, 20, .5)),
+    #2a2140 url("../../assets/fondo-lavanda.jpg") center / cover no-repeat fixed !important;
 }
 :root[data-tema="oscuro"] body[data-fondo="tulipanes"] {
   background:
-    linear-gradient(rgba(20, 8, 14, .58), rgba(20, 8, 14, .58)),
-    url("../../assets/fondo-tulipanes.svg") center / cover no-repeat fixed !important;
+    linear-gradient(rgba(20, 8, 14, .5), rgba(20, 8, 14, .5)),
+    #3a2230 url("../../assets/fondo-tulipanes.jpg") center / cover no-repeat fixed !important;
 }
