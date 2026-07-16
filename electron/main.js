@@ -93,14 +93,37 @@ function crearBandeja() {
   }
 }
 
-function enviarEmail(config, tarea, dias) {
-  if (!config.email.direccion || !config.email.appPassword) return Promise.resolve();
-  const transporte = nodemailer.createTransport({
+// Crea el transporte SMTP. Quita espacios de la contraseña de aplicación
+// (Gmail la muestra como "xxxx xxxx xxxx xxxx" y con espacios el login falla).
+function crearTransporte(config) {
+  return nodemailer.createTransport({
     host: config.email.smtpHost,
     port: config.email.smtpPort,
     secure: config.email.smtpPort === 465,
-    auth: { user: config.email.direccion, pass: config.email.appPassword }
+    auth: {
+      user: config.email.direccion,
+      pass: (config.email.appPassword || '').replace(/\s+/g, '')
+    }
   });
+}
+
+async function probarCorreo(config) {
+  if (!config.email.direccion || !config.email.appPassword) {
+    throw new Error('Falta el correo o la contraseña de aplicación en Configuración.');
+  }
+  const transporte = crearTransporte(config);
+  await transporte.verify();
+  await transporte.sendMail({
+    from: config.email.direccion,
+    to: config.email.direccion,
+    subject: 'Prueba de Agenda Personal',
+    text: 'Si recibes este correo, los avisos por email ya funcionan correctamente. 🎉'
+  });
+}
+
+function enviarEmail(config, tarea, dias) {
+  if (!config.email.direccion || !config.email.appPassword) return Promise.resolve();
+  const transporte = crearTransporte(config);
   const asunto = dias > 0
     ? `Recordatorio: "${tarea.titulo}" vence en ${dias} dia(s)`
     : `Recordatorio: "${tarea.titulo}" vence hoy`;
@@ -148,14 +171,33 @@ function registrarIpc() {
         }
       } catch (err) {
         console.error('Google sync:', err.message);
+        if (mainWindow) mainWindow.webContents.send('sync:error', 'Google Calendar: ' + err.message);
       }
     }
     if (config.icloudReminders.activo) {
-      icloudSync.sincronizarTarea(config, tarea).catch((err) => console.error('iCloud sync:', err.message));
+      try {
+        await icloudSync.sincronizarTarea(config, tarea);
+      } catch (err) {
+        console.error('iCloud sync:', err.message);
+        if (mainWindow) mainWindow.webContents.send('sync:error', 'iCloud: ' + err.message);
+      }
     }
     return tareas;
   });
   ipcMain.handle('tareas:eliminar', (evento, id) => store.deleteTarea(id));
+
+  ipcMain.handle('email:probar', async () => {
+    await probarCorreo(store.getConfig()); // lanza error si falla → el renderer lo muestra
+    return true;
+  });
+
+  ipcMain.handle('notif:probar', () => {
+    if (Notification.isSupported()) {
+      new Notification({ title: 'Prueba de notificación', body: '¡Las notificaciones funcionan! 🔔' }).show();
+      return true;
+    }
+    return false;
+  });
 
   ipcMain.handle('config:obtener', () => store.getConfig());
   ipcMain.handle('config:guardar', (evento, config) => {
@@ -190,6 +232,9 @@ function registrarIpc() {
 }
 
 app.whenReady().then(() => {
+  // Identidad de la app en Windows: necesaria para que las notificaciones (toasts)
+  // se muestren correctamente y aparezcan en el Centro de actividades.
+  app.setAppUserModelId('com.agendapersonal.app');
   registrarIpc();   // Primero los manejadores IPC, para que el renderer nunca se quede sin ellos.
   crearVentana();
   crearBandeja();

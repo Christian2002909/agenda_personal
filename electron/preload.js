@@ -11,5 +11,11 @@ contextBridge.exposeInMainWorld('agenda', {
 
   elegirImagenFondo: () => ipcRenderer.invoke('dialogo:elegir-imagen'),
 
-  autenticarGoogle: () => ipcRenderer.invoke('google:autenticar')
+  autenticarGoogle: () => ipcRenderer.invoke('google:autenticar'),
+
+  probarCorreo: () => ipcRenderer.invoke('email:probar'),
+  probarNotificacion: () => ipcRenderer.invoke('notif:probar'),
+
+  // Avisa al renderer cuando falla la sincronización con Google/iCloud
+  onSyncError: (cb) => ipcRenderer.on('sync:error', (evento, mensaje) => cb(mensaje))
 });

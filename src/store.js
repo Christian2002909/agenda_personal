@@ -7,5 +7,8 @@ const AgendaStore = {
   guardarConfig: (config) => window.agenda.guardarConfig(config),
   temaSistema: () => window.agenda.temaSistema(),
   elegirImagenFondo: () => window.agenda.elegirImagenFondo(),
-  autenticarGoogle: () => window.agenda.autenticarGoogle()
+  autenticarGoogle: () => window.agenda.autenticarGoogle(),
+  probarCorreo: () => window.agenda.probarCorreo(),
+  probarNotificacion: () => window.agenda.probarNotificacion(),
+  onSyncError: (cb) => window.agenda.onSyncError(cb)
 };

@@ -369,7 +369,7 @@ function cargarFormularioConfig() {
   document.getElementById('cfg-icloud-activo').checked = !!config.icloudReminders.activo;
 }
 
-async function guardarConfigDesdeFormulario() {
+async function guardarConfigDesdeFormulario(silencioso = false) {
   const nuevaConfig = {
     tema: document.getElementById('cfg-tema').value,
     colorPrograma: document.getElementById('cfg-color').value,
@@ -401,7 +401,7 @@ async function guardarConfigDesdeFormulario() {
 
   config = await AgendaStore.guardarConfig(nuevaConfig);
   aplicarConfigVisual();
-  alert('Configuración guardada.');
+  if (!silencioso) alert('Configuración guardada.');
 }
 
 // ---------- Inicialización ----------
@@ -413,6 +413,11 @@ async function init() {
   aplicarConfigVisual();
   cargarFormularioConfig();
   renderTareas();
+
+  // Avisar si falla la sincronización con Google/iCloud al guardar una tarea
+  AgendaStore.onSyncError((mensaje) => {
+    alert('No se pudo sincronizar la tarea:\n' + mensaje);
+  });
 
   document.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => cambiarVista(btn.dataset.view));
@@ -497,10 +502,33 @@ async function init() {
     aplicarPosicionPanel();
   });
 
-  document.getElementById('btn-guardar-config').addEventListener('click', guardarConfigDesdeFormulario);
+  document.getElementById('btn-guardar-config').addEventListener('click', () => guardarConfigDesdeFormulario());
+
+  // Probar correo: guarda la config actual y envía un correo de prueba
+  document.getElementById('btn-probar-correo').addEventListener('click', async () => {
+    const estado = document.getElementById('prueba-estado');
+    await guardarConfigDesdeFormulario(true);
+    estado.textContent = 'Enviando correo de prueba...';
+    try {
+      await AgendaStore.probarCorreo();
+      estado.textContent = '✅ Correo enviado. Revisa tu bandeja de entrada (y la carpeta de Spam).';
+    } catch (err) {
+      const msg = (err && err.message ? err.message : String(err)).replace(/^Error invoking remote method '[^']+':\s*/i, '');
+      estado.textContent = '❌ ' + msg;
+    }
+  });
+
+  // Probar notificación de Windows
+  document.getElementById('btn-probar-notif').addEventListener('click', async () => {
+    const estado = document.getElementById('prueba-estado');
+    const ok = await AgendaStore.probarNotificacion();
+    estado.textContent = ok
+      ? '✅ Notificación enviada. Si no la ves, revisa que Windows permita notificaciones y que "No molestar" esté desactivado.'
+      : '❌ Este sistema no soporta notificaciones.';
+  });
 
   document.getElementById('btn-google-conectar').addEventListener('click', async () => {
-    await guardarConfigDesdeFormulario();
+    await guardarConfigDesdeFormulario(true);
     document.getElementById('google-estado').textContent = 'Conectando... revisa el navegador';
     try {
       config = await AgendaStore.autenticarGoogle();
