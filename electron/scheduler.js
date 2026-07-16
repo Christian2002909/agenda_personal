@@ -21,7 +21,7 @@ function calcularAvisosPendientes(tareas, ultimosAvisos, ahora = new Date()) {
   const pendientes = [];
 
   for (const tarea of tareas) {
-    if (tarea.completada) continue;
+    if (tarea.completada || tarea.eliminada) continue;
     const dias = tarea.avisosPrevios && tarea.avisosPrevios.length ? tarea.avisosPrevios : [0];
     const horas = tarea.horarios && tarea.horarios.length ? tarea.horarios : ['09:00'];
 

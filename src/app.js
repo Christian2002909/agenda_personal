@@ -48,6 +48,7 @@ function aplicarFondo() {
   } else if (tipo === 'color') {
     body.style.background = valor || '';
   } else if (tipo === 'imagen' && valor) {
+    body.dataset.fondo = 'imagen';
     body.style.backgroundImage = `url("file://${valor.replace(/\\/g, '/')}")`;
     body.style.backgroundSize = 'cover';
     body.style.backgroundPosition = 'center';
@@ -424,7 +425,12 @@ async function init() {
   document.getElementById('btn-eliminar-tarea').addEventListener('click', async () => {
     const id = document.getElementById('tarea-id').value;
     if (id && confirm('¿Eliminar esta tarea?')) {
-      tareas = await AgendaStore.eliminarTarea(id);
+      const tarea = tareas.find((t) => t.id === id);
+      if (tarea) {
+        tarea.eliminada = true;
+        tarea.eliminadaEn = new Date().toISOString();
+        tareas = await AgendaStore.guardarTarea(tarea);
+      }
       cerrarModal();
       renderTareas();
     }

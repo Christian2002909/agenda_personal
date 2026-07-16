@@ -14,11 +14,8 @@
     linear-gradient(180deg, rgba(255, 255, 255, .18), rgba(255, 255, 255, .02) 40%, transparent 75%),
     linear-gradient(0deg, var(--glass-bg), var(--glass-bg));
   background-repeat: no-repeat;
-  /* Fallback: desenfoque fuerte si el navegador no soporta filtro SVG en backdrop */
   backdrop-filter: blur(14px) saturate(180%) brightness(1.06);
   -webkit-backdrop-filter: blur(14px) saturate(180%) brightness(1.06);
-  /* Réplica avanzada: refracción/distorsión real del fondo (efecto lente) + blur suave */
-  backdrop-filter: url(#glass-distortion) blur(4px) saturate(185%) brightness(1.06);
   border: 1px solid var(--glass-borde);
   /* Rim especular (luz arriba-izquierda, sombra abajo-derecha) + sombra flotante */
   box-shadow:

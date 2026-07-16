@@ -14,10 +14,10 @@
   --input-bg: rgba(255, 255, 255, .7);
   --hover-bg: rgba(0, 0, 0, .05);
   --borde: rgba(0, 0, 0, .12);
-  /* Vidrio: muy translúcido para que se vea el fondo detrás (estilo Apple) */
   --glass-bg: rgba(255, 255, 255, .28);
   --glass-borde: rgba(255, 255, 255, .55);
   --glass-rim: rgba(255, 255, 255, .65);
+  --texto-sombra: none;
 }
 
 /* Modo oscuro */
@@ -31,13 +31,44 @@
   --glass-bg: rgba(40, 42, 60, .35);
   --glass-borde: rgba(255, 255, 255, .16);
   --glass-rim: rgba(255, 255, 255, .35);
+  --texto-sombra: none;
 }
 
-/*
-  Fondos decorativos ILUSTRADOS (presets del selector "Fondo").
-  Papel tapiz vectorial (SVG) de flores; cubre toda la ventana.
-*/
-/* Fotos reales (colócalas en assets/). Debajo va un color de respaldo por si falta la foto. */
+/* ──────────────────────────────────────────────
+   Fondos fotográficos: vidrio más opaco + sombra de texto
+   para garantizar legibilidad sobre cualquier foto.
+   ────────────────────────────────────────────── */
+
+/* Claro + foto */
+:root[data-tema="claro"] body[data-fondo="lavanda"],
+:root[data-tema="claro"] body[data-fondo="tulipanes"],
+:root[data-tema="claro"] body[data-fondo="imagen"],
+body[data-fondo="lavanda"],
+body[data-fondo="tulipanes"],
+body[data-fondo="imagen"] {
+  --glass-bg: rgba(255, 255, 255, .52);
+  --glass-borde: rgba(255, 255, 255, .70);
+  --glass-rim: rgba(255, 255, 255, .80);
+  --panel-solid: rgba(255, 255, 255, .60);
+  --input-bg: rgba(255, 255, 255, .75);
+  --texto-sombra: 0 1px 3px rgba(0, 0, 0, .25);
+}
+
+/* Oscuro + foto */
+:root[data-tema="oscuro"] body[data-fondo="lavanda"],
+:root[data-tema="oscuro"] body[data-fondo="tulipanes"],
+:root[data-tema="oscuro"] body[data-fondo="imagen"] {
+  --glass-bg: rgba(15, 15, 30, .62);
+  --glass-borde: rgba(255, 255, 255, .18);
+  --glass-rim: rgba(255, 255, 255, .30);
+  --panel-solid: rgba(20, 20, 40, .65);
+  --input-bg: rgba(30, 30, 55, .70);
+  --texto-sombra: 0 1px 4px rgba(0, 0, 0, .55);
+}
+
+/* ──────────────────────────────────────────────
+   Fotos de fondo preset
+   ────────────────────────────────────────────── */
 body[data-fondo="lavanda"] {
   background: #d9c9f0 url("../../assets/fondo-lavanda.jpg") center / cover no-repeat fixed !important;
 }
@@ -56,3 +87,4 @@ body[data-fondo="tulipanes"] {
     linear-gradient(rgba(20, 8, 14, .5), rgba(20, 8, 14, .5)),
     #3a2230 url("../../assets/fondo-tulipanes.jpg") center / cover no-repeat fixed !important;
 }
+

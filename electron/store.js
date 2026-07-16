@@ -43,12 +43,28 @@ function deleteTarea(id) {
 }
 
 function getConfig() {
-  return { ...defaultConfig, ...store.get('config', defaultConfig) };
+  const stored = store.get('config', {});
+  return {
+    ...defaultConfig,
+    ...stored,
+    fondo: { ...defaultConfig.fondo, ...(stored.fondo || {}) },
+    email: { ...defaultConfig.email, ...(stored.email || {}) },
+    googleCalendar: { ...defaultConfig.googleCalendar, ...(stored.googleCalendar || {}) },
+    icloudReminders: { ...defaultConfig.icloudReminders, ...(stored.icloudReminders || {}) }
+  };
 }
 
 function saveConfig(config) {
-  store.set('config', { ...getConfig(), ...config });
-  return getConfig();
+  const merged = {
+    ...getConfig(),
+    ...config,
+    fondo: { ...getConfig().fondo, ...(config.fondo || {}) },
+    email: { ...getConfig().email, ...(config.email || {}) },
+    googleCalendar: { ...getConfig().googleCalendar, ...(config.googleCalendar || {}) },
+    icloudReminders: { ...getConfig().icloudReminders, ...(config.icloudReminders || {}) }
+  };
+  store.set('config', merged);
+  return merged;
 }
 
 function getUltimosAvisos() {

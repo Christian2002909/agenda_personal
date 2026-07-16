@@ -137,10 +137,18 @@ function iniciarScheduler() {
 function registrarIpc() {
   ipcMain.handle('tareas:listar', () => store.getTareas());
   ipcMain.handle('tareas:guardar', async (evento, tarea) => {
-    const tareas = store.saveTarea(tarea);
+    let tareas = store.saveTarea(tarea);
     const config = store.getConfig();
     if (config.googleCalendar.activo) {
-      googleSync.crearOActualizarEvento(config, tarea).catch((err) => console.error('Google sync:', err.message));
+      try {
+        const eventId = await googleSync.crearOActualizarEvento(config, tarea);
+        if (eventId && eventId !== tarea.googleEventId) {
+          tarea.googleEventId = eventId;
+          tareas = store.saveTarea(tarea);
+        }
+      } catch (err) {
+        console.error('Google sync:', err.message);
+      }
     }
     if (config.icloudReminders.activo) {
       icloudSync.sincronizarTarea(config, tarea).catch((err) => console.error('iCloud sync:', err.message));
@@ -169,10 +177,15 @@ function registrarIpc() {
 
   ipcMain.handle('google:autenticar', async () => {
     const config = store.getConfig();
-    const tokens = await googleSync.autenticar(config);
-    config.googleCalendar.tokens = tokens;
-    config.googleCalendar.activo = true;
-    return store.saveConfig(config);
+    try {
+      const tokens = await googleSync.autenticar(config);
+      config.googleCalendar.tokens = tokens;
+      config.googleCalendar.activo = true;
+      return store.saveConfig(config);
+    } catch (err) {
+      console.error('Error en autenticación Google:', err.message);
+      throw err;
+    }
   });
 }
 

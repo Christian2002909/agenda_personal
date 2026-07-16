@@ -34,10 +34,27 @@ async function sincronizarTarea(config, tarea) {
   const listaRecordatorios = calendars.find((c) => c.components && c.components.includes('VTODO')) || calendars[0];
   if (!listaRecordatorios) throw new Error('No se encontro una lista de Recordatorios en iCloud');
 
+  const filename = `${tarea.id}.ics`;
+  const icalString = tareaAVTodo(tarea);
+
+  // Intentar actualizar primero; si no existe, crear
+  try {
+    const objetos = await client.fetchCalendarObjects({ calendar: listaRecordatorios });
+    const existente = objetos.find((o) => o.url && o.url.includes(filename));
+    if (existente) {
+      return client.updateCalendarObject({
+        calendarObject: { url: existente.url, etag: existente.etag, data: icalString }
+      });
+    }
+  } catch (err) {
+    // Si falla la búsqueda, intentamos crear directamente
+    console.error('iCloud fetch para update falló, creando nuevo:', err.message);
+  }
+
   return client.createCalendarObject({
     calendar: listaRecordatorios,
-    filename: `${tarea.id}.ics`,
-    iCalString: tareaAVTodo(tarea)
+    filename,
+    iCalString: icalString
   });
 }
 

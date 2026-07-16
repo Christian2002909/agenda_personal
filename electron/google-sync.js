@@ -59,10 +59,11 @@ async function crearOActualizarEvento(config, tarea) {
   };
 
   if (tarea.googleEventId) {
-    return calendar.events.update({ calendarId: 'primary', eventId: tarea.googleEventId, requestBody: evento });
+    const actualizado = await calendar.events.update({ calendarId: 'primary', eventId: tarea.googleEventId, requestBody: evento });
+    return actualizado.data.id;
   }
   const creado = await calendar.events.insert({ calendarId: 'primary', requestBody: evento });
-  return creado.data;
+  return creado.data.id;
 }
 
 module.exports = { autenticar, crearOActualizarEvento };

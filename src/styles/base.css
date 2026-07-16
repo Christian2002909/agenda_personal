@@ -7,6 +7,7 @@ html, body {
   font-family: 'Segoe UI', system-ui, sans-serif;
   color: var(--fg);
   transition: color .2s ease;
+  text-shadow: var(--texto-sombra, none);
 }
 
 /* Fondo degradado por defecto (derivado del color de acento) para que el
@@ -50,6 +51,7 @@ body {
   font-size: 1.1rem;
   font-weight: 700;
   margin-bottom: .5rem;
+  text-shadow: var(--texto-sombra, none);
 }
 
 .nav-btn {
@@ -84,8 +86,8 @@ body {
   margin-bottom: 1.25rem;
 }
 
-h1 { margin: 0; font-size: 1.4rem; }
-h2 { margin: 0 0 .75rem 0; font-size: 1.05rem; }
+h1 { margin: 0; font-size: 1.4rem; text-shadow: var(--texto-sombra, none); }
+h2 { margin: 0 0 .75rem 0; font-size: 1.05rem; text-shadow: var(--texto-sombra, none); }
 
 .btn-primario, .btn-secundario, .btn-peligro {
   border: none;
