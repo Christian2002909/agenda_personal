@@ -32,8 +32,8 @@ function calcularAvisosPendientes(tareas, ultimosAvisos, ahora = new Date()) {
         const clave = formatoClave(tarea.id, d, hora, objetivo);
         const yaDisparado = !!ultimosAvisos[clave];
         const diffMs = ahora.getTime() - objetivo.getTime();
-        // Se dispara si ya pasó la hora objetivo (hasta 2 minutos de tolerancia) y no se disparó antes.
-        if (!yaDisparado && diffMs >= 0 && diffMs < 2 * 60 * 1000) {
+        // Se dispara si ya pasó la hora objetivo (hasta 5 minutos de tolerancia) y no se disparó antes.
+        if (!yaDisparado && diffMs >= 0 && diffMs < 5 * 60 * 1000) {
           pendientes.push({ tarea, dias: d, hora, clave });
         }
       }

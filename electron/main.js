@@ -11,6 +11,24 @@ let mainWindow = null;
 let tray = null;
 let saliendo = false;
 
+// Evita que se abran varias copias de la app a la vez (cada una con su propio
+// reloj/scheduler y sus propios datos en memoria, lo que causaba que los avisos
+// no se dispararan de forma confiable). Si ya hay una instancia corriendo, esta
+// nueva se cierra y le pide a la existente que se muestre en pantalla.
+const seObtuvoElBloqueo = app.requestSingleInstanceLock();
+
+if (!seObtuvoElBloqueo) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 function crearVentana() {
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -248,6 +266,7 @@ function registrarIpc() {
 }
 
 app.whenReady().then(() => {
+  if (!seObtuvoElBloqueo) return; // otra instancia ya está corriendo; esta se está cerrando.
   // Identidad de la app en Windows: necesaria para que las notificaciones (toasts)
   // se muestren correctamente y aparezcan en el Centro de actividades.
   app.setAppUserModelId('com.agendapersonal.app');
