@@ -8,7 +8,10 @@ const defaultConfig = {
   email: { direccion: '', appPassword: '', smtpHost: 'smtp.gmail.com', smtpPort: 465 },
   iniciarConWindows: false,
   googleCalendar: { clientId: '', clientSecret: '', tokens: null, activo: false },
-  icloudReminders: { appleId: '', appPassword: '', activo: false }
+  icloudReminders: { appleId: '', appPassword: '', activo: false },
+  // Canales de aviso: cada uno se puede prender/apagar sin afectar a los demás,
+  // aunque Google/iCloud ya estén conectados.
+  notificaciones: { ventana: true, correo: true }
 };
 
 const store = new Store({
@@ -50,7 +53,8 @@ function getConfig() {
     fondo: { ...defaultConfig.fondo, ...(stored.fondo || {}) },
     email: { ...defaultConfig.email, ...(stored.email || {}) },
     googleCalendar: { ...defaultConfig.googleCalendar, ...(stored.googleCalendar || {}) },
-    icloudReminders: { ...defaultConfig.icloudReminders, ...(stored.icloudReminders || {}) }
+    icloudReminders: { ...defaultConfig.icloudReminders, ...(stored.icloudReminders || {}) },
+    notificaciones: { ...defaultConfig.notificaciones, ...(stored.notificaciones || {}) }
   };
 }
 
@@ -61,7 +65,8 @@ function saveConfig(config) {
     fondo: { ...getConfig().fondo, ...(config.fondo || {}) },
     email: { ...getConfig().email, ...(config.email || {}) },
     googleCalendar: { ...getConfig().googleCalendar, ...(config.googleCalendar || {}) },
-    icloudReminders: { ...getConfig().icloudReminders, ...(config.icloudReminders || {}) }
+    icloudReminders: { ...getConfig().icloudReminders, ...(config.icloudReminders || {}) },
+    notificaciones: { ...getConfig().notificaciones, ...(config.notificaciones || {}) }
   };
   store.set('config', merged);
   return merged;

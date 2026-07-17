@@ -82,6 +82,19 @@
         </div>
 
         <div class="grupo glass">
+          <h2>Canales de aviso</h2>
+          <p class="ayuda-arrastrar" style="margin:0 0 .6rem">Elige por dónde quieres que te avisen. Puedes combinar los que quieras (ej. solo correo, o correo + Google Calendar).</p>
+          <label class="checkbox">
+            <input type="checkbox" id="cfg-notif-ventana" />
+            Notificación de Windows (suena 3 veces)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="cfg-notif-correo" />
+            Aviso por correo electrónico
+          </label>
+        </div>
+
+        <div class="grupo glass">
           <h2>Avisos por correo</h2>
           <label>Correo electrónico
             <input type="email" id="cfg-email-direccion" placeholder="tucorreo@gmail.com" />
@@ -112,6 +125,7 @@
 
         <div class="grupo glass">
           <h2>Sincronización con Google Calendar (opcional)</h2>
+          <p class="ayuda-arrastrar" style="margin:0 0 .6rem">Este es el canal que llega a tu celular, a través de la app de Google Calendar.</p>
           <label>Client ID
             <input type="text" id="cfg-google-clientid" />
           </label>
@@ -120,6 +134,10 @@
           </label>
           <button id="btn-google-conectar" class="btn-secundario">Conectar con Google</button>
           <span id="google-estado" class="estado"></span>
+          <label class="checkbox" style="margin-top:.7rem">
+            <input type="checkbox" id="cfg-google-activo" />
+            Activar sincronización con Google Calendar (aunque ya esté conectado, puedes apagar esto sin perder la conexión)
+          </label>
         </div>
 
         <div class="grupo glass">

@@ -355,6 +355,9 @@ function cargarFormularioConfig() {
   document.getElementById('cfg-fondo-color').value = config.fondo.tipo === 'color' && config.fondo.valor ? config.fondo.valor : '#ffffff';
   actualizarControlesFondo();
 
+  document.getElementById('cfg-notif-ventana').checked = config.notificaciones ? !!config.notificaciones.ventana : true;
+  document.getElementById('cfg-notif-correo').checked = config.notificaciones ? !!config.notificaciones.correo : true;
+
   document.getElementById('cfg-email-direccion').value = config.email.direccion;
   document.getElementById('cfg-email-password').value = config.email.appPassword;
   document.getElementById('cfg-email-host').value = config.email.smtpHost;
@@ -364,6 +367,7 @@ function cargarFormularioConfig() {
 
   document.getElementById('cfg-google-clientid').value = config.googleCalendar.clientId;
   document.getElementById('cfg-google-clientsecret').value = config.googleCalendar.clientSecret;
+  document.getElementById('cfg-google-activo').checked = !!config.googleCalendar.activo;
   document.getElementById('google-estado').textContent = config.googleCalendar.tokens ? 'Conectado' : 'No conectado';
 
   document.getElementById('cfg-icloud-appleid').value = config.icloudReminders.appleId;
@@ -389,10 +393,15 @@ async function guardarConfigDesdeFormulario(silencioso = false) {
       smtpPort: Number(document.getElementById('cfg-email-puerto').value) || 465
     },
     iniciarConWindows: document.getElementById('cfg-autostart').checked,
+    notificaciones: {
+      ventana: document.getElementById('cfg-notif-ventana').checked,
+      correo: document.getElementById('cfg-notif-correo').checked
+    },
     googleCalendar: {
       ...config.googleCalendar,
       clientId: document.getElementById('cfg-google-clientid').value.trim(),
-      clientSecret: document.getElementById('cfg-google-clientsecret').value.trim()
+      clientSecret: document.getElementById('cfg-google-clientsecret').value.trim(),
+      activo: document.getElementById('cfg-google-activo').checked
     },
     icloudReminders: {
       appleId: document.getElementById('cfg-icloud-appleid').value.trim(),

@@ -135,16 +135,29 @@ function enviarEmail(config, tarea, dias) {
   });
 }
 
+// Muestra la notificación de Windows 3 veces seguidas (espaciadas) para no pasarla por alto.
+function mostrarNotificacionRepetida(titulo, cuerpo, vecesRestantes = 3) {
+  if (!Notification.isSupported() || vecesRestantes <= 0) return;
+  new Notification({ title: titulo, body: cuerpo }).show();
+  if (vecesRestantes > 1) {
+    setTimeout(() => mostrarNotificacionRepetida(titulo, cuerpo, vecesRestantes - 1), 2500);
+  }
+}
+
 function dispararAviso(aviso) {
   const config = store.getConfig();
   const { tarea, dias } = aviso;
   const texto = dias > 0 ? `Vence en ${dias} dia(s): ${tarea.fechaLimite}` : `Vence hoy (${tarea.fechaLimite})`;
+  const canales = config.notificaciones || { ventana: true, correo: true };
 
-  if (Notification.isSupported()) {
-    new Notification({ title: tarea.titulo, body: texto }).show();
+  if (canales.ventana) {
+    mostrarNotificacionRepetida(tarea.titulo, texto);
   }
 
-  enviarEmail(config, tarea, dias).catch((err) => console.error('Error enviando email:', err.message));
+  if (canales.correo) {
+    enviarEmail(config, tarea, dias).catch((err) => console.error('Error enviando email:', err.message));
+  }
+
   store.marcarAvisoDisparado(aviso.clave);
 }
 
