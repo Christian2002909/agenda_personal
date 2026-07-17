@@ -425,9 +425,9 @@ async function init() {
   cargarFormularioConfig();
   renderTareas();
 
-  // Avisar si falla la sincronización con Google/iCloud al guardar una tarea
+  // Avisar si falla la sincronización con Google/iCloud, o el envío de un correo de aviso
   AgendaStore.onSyncError((mensaje) => {
-    alert('No se pudo sincronizar la tarea:\n' + mensaje);
+    alert('No se pudo completar un aviso:\n' + mensaje);
   });
 
   document.querySelectorAll('.nav-btn').forEach((btn) => {

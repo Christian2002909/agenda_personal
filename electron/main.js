@@ -155,7 +155,10 @@ function dispararAviso(aviso) {
   }
 
   if (canales.correo) {
-    enviarEmail(config, tarea, dias).catch((err) => console.error('Error enviando email:', err.message));
+    enviarEmail(config, tarea, dias).catch((err) => {
+      console.error('Error enviando email:', err.message);
+      if (mainWindow) mainWindow.webContents.send('sync:error', `Correo del aviso "${tarea.titulo}": ${err.message}`);
+    });
   }
 
   store.marcarAvisoDisparado(aviso.clave);
