@@ -46,6 +46,7 @@ function aplicarFondo() {
     // El degradado decorativo lo define themes.css según data-fondo
     body.dataset.fondo = tipo;
   } else if (tipo === 'color') {
+    body.dataset.fondo = 'color';
     body.style.background = valor || '';
   } else if (tipo === 'imagen' && valor) {
     body.dataset.fondo = 'imagen';

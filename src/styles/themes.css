@@ -39,13 +39,15 @@
    para garantizar legibilidad sobre cualquier foto.
    ────────────────────────────────────────────── */
 
-/* Claro + foto */
+/* Claro + foto/color sólido */
 :root[data-tema="claro"] body[data-fondo="lavanda"],
 :root[data-tema="claro"] body[data-fondo="tulipanes"],
 :root[data-tema="claro"] body[data-fondo="imagen"],
+:root[data-tema="claro"] body[data-fondo="color"],
 body[data-fondo="lavanda"],
 body[data-fondo="tulipanes"],
-body[data-fondo="imagen"] {
+body[data-fondo="imagen"],
+body[data-fondo="color"] {
   --glass-bg: rgba(255, 255, 255, .52);
   --glass-borde: rgba(255, 255, 255, .70);
   --glass-rim: rgba(255, 255, 255, .80);
@@ -54,10 +56,11 @@ body[data-fondo="imagen"] {
   --texto-sombra: 0 1px 3px rgba(0, 0, 0, .25);
 }
 
-/* Oscuro + foto */
+/* Oscuro + foto/color sólido */
 :root[data-tema="oscuro"] body[data-fondo="lavanda"],
 :root[data-tema="oscuro"] body[data-fondo="tulipanes"],
-:root[data-tema="oscuro"] body[data-fondo="imagen"] {
+:root[data-tema="oscuro"] body[data-fondo="imagen"],
+:root[data-tema="oscuro"] body[data-fondo="color"] {
   --glass-bg: rgba(15, 15, 30, .62);
   --glass-borde: rgba(255, 255, 255, .18);
   --glass-rim: rgba(255, 255, 255, .30);
