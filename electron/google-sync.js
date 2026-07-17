@@ -124,4 +124,18 @@ async function crearOActualizarEvento(config, tarea) {
   return creado.data.id;
 }
 
-module.exports = { autenticar, crearOActualizarEvento };
+// Borra el evento del calendario (usado cuando la tarea se completa o se elimina).
+async function eliminarEvento(config, tarea) {
+  if (!config.googleCalendar.activo || !config.googleCalendar.tokens || !tarea.googleEventId) return;
+  const auth = crearCliente(config);
+  const calendar = google.calendar({ version: 'v3', auth });
+  try {
+    await calendar.events.delete({ calendarId: 'primary', eventId: tarea.googleEventId });
+  } catch (err) {
+    // Si el evento ya no existe (borrado a mano, etc.) no es un error real.
+    const status = err && err.response && err.response.status;
+    if (status !== 404 && status !== 410) throw err;
+  }
+}
+
+module.exports = { autenticar, crearOActualizarEvento, eliminarEvento };

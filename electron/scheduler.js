@@ -45,4 +45,20 @@ function calcularAvisosPendientes(tareas, ultimosAvisos, ahora = new Date()) {
   return pendientes;
 }
 
-module.exports = { calcularAvisosPendientes, combinarFechaHora, fechaConDiasRestados };
+// Devuelve true si al menos uno de los avisos configurados de la tarea ya venció
+// (sin importar si ya se disparó antes) — se usa para la re-insistencia periódica.
+function tareaEstaVencida(tarea, ahora = new Date()) {
+  const dias = tarea.avisosPrevios && tarea.avisosPrevios.length ? tarea.avisosPrevios : [0];
+  const horas = tarea.horarios && tarea.horarios.length ? tarea.horarios : ['09:00'];
+
+  for (const d of dias) {
+    const fechaBase = fechaConDiasRestados(tarea.fechaLimite, d);
+    for (const hora of horas) {
+      const objetivo = combinarFechaHora(fechaBase.toISOString().slice(0, 10), hora);
+      if (ahora.getTime() - objetivo.getTime() >= 0) return true;
+    }
+  }
+  return false;
+}
+
+module.exports = { calcularAvisosPendientes, combinarFechaHora, fechaConDiasRestados, tareaEstaVencida };

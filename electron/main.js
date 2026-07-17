@@ -3,9 +3,12 @@ const path = require('path');
 const nodemailer = require('nodemailer');
 
 const store = require('./store');
-const { calcularAvisosPendientes } = require('./scheduler');
+const { calcularAvisosPendientes, tareaEstaVencida } = require('./scheduler');
 const googleSync = require('./google-sync');
 const icloudSync = require('./icloud-sync');
+
+const INTERVALO_NAG_VENTANA_MS = 5 * 60 * 1000;
+const INTERVALO_NAG_CALENDARIO_MS = 10 * 60 * 1000;
 
 let mainWindow = null;
 let tray = null;
@@ -153,13 +156,11 @@ function enviarEmail(config, tarea, dias) {
   });
 }
 
-// Muestra la notificación de Windows 3 veces seguidas (espaciadas) para no pasarla por alto.
-function mostrarNotificacionRepetida(titulo, cuerpo, vecesRestantes = 3) {
-  if (!Notification.isSupported() || vecesRestantes <= 0) return;
+// Muestra la notificación de Windows una sola vez (la re-insistencia periódica
+// se encarga de repetirla cada 5 minutos mientras la tarea siga sin completar).
+function mostrarNotificacion(titulo, cuerpo) {
+  if (!Notification.isSupported()) return;
   new Notification({ title: titulo, body: cuerpo }).show();
-  if (vecesRestantes > 1) {
-    setTimeout(() => mostrarNotificacionRepetida(titulo, cuerpo, vecesRestantes - 1), 2500);
-  }
 }
 
 function dispararAviso(aviso) {
@@ -169,7 +170,7 @@ function dispararAviso(aviso) {
   const canales = config.notificaciones || { ventana: true, correo: true };
 
   if (canales.ventana) {
-    mostrarNotificacionRepetida(tarea.titulo, texto);
+    mostrarNotificacion(tarea.titulo, texto);
   }
 
   if (canales.correo) {
@@ -180,6 +181,41 @@ function dispararAviso(aviso) {
   }
 
   store.marcarAvisoDisparado(aviso.clave);
+}
+
+// Devuelve true (y marca la clave) si ya pasó el intervalo indicado desde la última
+// vez que se disparó esa clave. Reutiliza el mismo almacén de "últimos avisos".
+function debeRenagar(ultimosAvisos, clave, intervaloMs, ahora) {
+  const ultimo = ultimosAvisos[clave];
+  if (!ultimo || ahora.getTime() - ultimo >= intervaloMs) {
+    store.marcarAvisoDisparado(clave);
+    return true;
+  }
+  return false;
+}
+
+// Mientras una tarea venga sin completar (y ya haya vencido alguno de sus avisos),
+// insiste con la notificación de Windows cada 5 minutos y re-sincroniza el evento
+// de Google Calendar cada 10 minutos, para que no pase desapercibida.
+function reinsistirTareasVencidas(ahora) {
+  const config = store.getConfig();
+  const canales = config.notificaciones || { ventana: true, correo: true };
+  const tareas = store.getTareas().filter((t) => !t.completada && !t.eliminada);
+  const ultimosAvisos = store.getUltimosAvisos();
+
+  for (const tarea of tareas) {
+    if (!tareaEstaVencida(tarea, ahora)) continue;
+
+    if (canales.ventana && debeRenagar(ultimosAvisos, `nagVentana:${tarea.id}`, INTERVALO_NAG_VENTANA_MS, ahora)) {
+      mostrarNotificacion(tarea.titulo, `Vence el ${tarea.fechaLimite} y sigue pendiente`);
+    }
+
+    if (config.googleCalendar.activo && debeRenagar(ultimosAvisos, `nagCalendario:${tarea.id}`, INTERVALO_NAG_CALENDARIO_MS, ahora)) {
+      googleSync.crearOActualizarEvento(config, tarea).catch((err) => {
+        console.error('Google sync (re-insistencia):', err.message);
+      });
+    }
+  }
 }
 
 function iniciarScheduler() {
@@ -205,6 +241,8 @@ function iniciarScheduler() {
       console.log(`[scheduler] Disparando aviso: "${p.tarea.titulo}" (clave=${p.clave})`);
       dispararAviso(p);
     });
+
+    reinsistirTareasVencidas(ahora);
   };
   revisar();
   setInterval(revisar, 30 * 1000);
@@ -215,7 +253,19 @@ function registrarIpc() {
   ipcMain.handle('tareas:guardar', async (evento, tarea) => {
     let tareas = store.saveTarea(tarea);
     const config = store.getConfig();
-    if (config.googleCalendar.activo) {
+    const seCompletoOElimino = (tarea.completada || tarea.eliminada) && tarea.googleEventId;
+
+    if (seCompletoOElimino) {
+      // Al completar (o eliminar) la tarea, el evento desaparece del calendario.
+      try {
+        await googleSync.eliminarEvento(config, tarea);
+      } catch (err) {
+        console.error('Google sync (eliminar evento):', err.message);
+        if (mainWindow) mainWindow.webContents.send('sync:error', 'Google Calendar: ' + err.message);
+      }
+      tarea.googleEventId = null;
+      tareas = store.saveTarea(tarea);
+    } else if (config.googleCalendar.activo) {
       try {
         const eventId = await googleSync.crearOActualizarEvento(config, tarea);
         if (eventId && eventId !== tarea.googleEventId) {
